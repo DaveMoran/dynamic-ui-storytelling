@@ -186,7 +186,7 @@ function App() {
 
   // Memory / identity state
   const [userId, setUserId] = useState('')
-  const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
   const [characterContext, setCharacterContext] = useState<string | undefined>()
   const [availableCharacters, setAvailableCharacters] = useState<CharacterSummary[]>([])
   const [welcomeInput, setWelcomeInput] = useState('')
@@ -377,16 +377,15 @@ function App() {
     }
   }
 
-  // The first user message IS the character's name (verbatim).
-  // For returning characters, fall back to the name embedded in characterContext.
+  // For returning characters the name lives in characterContext — always prefer that.
+  // For brand-new characters there is no characterContext, so the first user message IS the name.
   const deriveCharacterName = (): string | undefined => {
-    const firstUserMsg = messages.find(m => m.role === 'user')?.content?.trim()
-    if (firstUserMsg) return firstUserMsg
     if (characterContext) {
       const match = characterContext.match(/^([^:]+):/)
       if (match) return match[1].trim()
+      return characterContext.trim()
     }
-    return undefined
+    return messages.find(m => m.role === 'user')?.content?.trim()
   }
 
   // Description is whatever follows "Name: " in characterContext, or empty for new chars.
