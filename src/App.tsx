@@ -53,7 +53,10 @@ interface HelloResponse extends SceneData {
 interface ChatResponse extends SceneData {
   message: string
   offTopic: boolean
+  suggestEnding: boolean
 }
+
+type UIMode = 'chatting' | 'suggest-ending' | 'ended'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -151,6 +154,10 @@ function App() {
   // Asset layer
   const [placedAssets, setPlacedAssets] = useState<PlacedAsset[]>([])
 
+  // Story ending flow
+  const [uiMode, setUiMode] = useState<UIMode>('chatting')
+  const [savedFilename, setSavedFilename] = useState<string | null>(null)
+
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll
@@ -172,8 +179,17 @@ function App() {
     setPlacedAssets(generatePlacedAssets(assets, stops))
   }
 
-  // Fetch opening story line on mount
-  useEffect(() => {
+  const startNewStory = () => {
+    setMessages([])
+    setStoryTurnCount(0)
+    setInput('')
+    setUiMode('chatting')
+    setSavedFilename(null)
+    setPlacedAssets([])
+    if (fadeTimer.current) clearTimeout(fadeTimer.current)
+    setBgBase(buildGradient(DEFAULT_STOPS))
+    setBgIncoming(null)
+
     setLoading(true)
     fetch('/api/hello')
       .then(r => r.json())
@@ -183,6 +199,11 @@ function App() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
+  }
+
+  // Start on mount
+  useEffect(() => {
+    startNewStory()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = async () => {
