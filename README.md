@@ -11,6 +11,10 @@ Children ages 6–12 have vivid imaginations but limited tools that make storyte
 
 ## Versions
 
+### v1.1
+- Add new ui elements for story end
+- Save story to markdown files
+
 ### v1.0
 = Finalize setup of screen
 - Initial runthrough of story to see how everything changes.
