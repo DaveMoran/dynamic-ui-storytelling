@@ -58,7 +58,10 @@ type StoryResponseType = z.infer<typeof StoryResponse>
 
 // ── Story phase instructions ──────────────────────────────────────────────────
 function getPhaseInstructions(turn: number): string {
-  if (turn <= 5) {
+  if (turn === 1) {
+    return 'STORY PHASE — LAUNCH: The user has just described their main character. Use their description to begin the story. ' +
+      'Introduce the character by name with a vivid opening sentence, place them in an exciting setting, and hint at the adventure ahead.'
+  } else if (turn <= 5) {
     return 'STORY PHASE — BEGINNING: Introduce the main character(s) and setting. Build a sense of wonder and excitement.'
   } else if (turn <= 10) {
     return 'STORY PHASE — MIDDLE: Develop the adventure. Introduce a fun challenge, mystery, or quest.'
@@ -81,6 +84,7 @@ STORY RULES:
 3. ENDINGS: Always happy or hopeful. Never sad, scary, or bad.
 4. OFF-TOPIC: If the user goes off-topic, set offTopic=true and redirect them with: "Oops! Let's get back to our story! [one recap sentence]." Do not count this turn.
 5. STORY INPUT: Embrace silly or unexpected ideas. Set offTopic=false.
+6. CONTINUATION: Read the FULL conversation history above. Your response must directly continue from the last story beat — reference the characters, locations, and events already established, and naturally weave in the user's latest message as the next moment in the ongoing story. Never restart or ignore what came before.
 
 SCENE DESIGN — return gradientStops (3–5 stops) and assets (2–5 items):
 
@@ -101,6 +105,8 @@ EMOJI ASSETS (choose from these only):
   water      → 🌊 🐟 🐠 🦆 ⛵ 🪸 🐚 🦀
   underground → 💎 🔮 🦇 🍂 🌑 🪨 🕯️
   space      → 🌟 ⭐ 🪐 🚀 ☄️ 🛸
+  food      → 🍎 🍌 🍕 🍔 🍦 🍩 🧁 🥕 🌽
+  animals    → 🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🦁 🐮 🐷 🐸 🐵 🦉
 
 ASSET SIZING — set size to reflect how the story describes each element:
   xs → tiny, miniature  (e.g. "tiny bunny", "little bee")
@@ -168,11 +174,12 @@ app.get('/api/hello', async (_req, res) => {
     const response: HelloResponseType = await model.invoke([
       new SystemMessage(
         'You are a friendly storytelling assistant for children ages 6–12. ' +
-          'Start a magical, whimsical story with a single vivid opening sentence. ' +
-          'Return a multi-stop gradient and emoji assets that match the opening scene. ' +
-          'Use the hard-line gradient technique to clearly separate sky and ground zones.'
+        'Your job right now is to warmly welcome the child and ask them ONE question to learn about their main character. ' +
+        'Ask for: their character\'s name and one thing that makes them special (e.g. a superpower, a pet, a favourite thing). ' +
+        'Keep it to 1–2 short, enthusiastic sentences — make it feel exciting to answer! ' +
+        'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
+        'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
       ),
-      new HumanMessage('Begin the story!'),
     ])
 
     res.json(response)
