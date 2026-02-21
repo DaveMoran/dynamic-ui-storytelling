@@ -1,7 +1,7 @@
 {
   "name": "dynamic-ui-storytelling",
   "private": true,
-  "version": "1.0",
+  "version": "1.1",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch server/index.ts\"",

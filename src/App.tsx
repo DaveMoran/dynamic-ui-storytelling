@@ -53,7 +53,10 @@ interface HelloResponse extends SceneData {
 interface ChatResponse extends SceneData {
   message: string
   offTopic: boolean
+  suggestEnding: boolean
 }
+
+type UIMode = 'chatting' | 'suggest-ending' | 'ended'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -151,6 +154,10 @@ function App() {
   // Asset layer
   const [placedAssets, setPlacedAssets] = useState<PlacedAsset[]>([])
 
+  // Story ending flow
+  const [uiMode, setUiMode] = useState<UIMode>('chatting')
+  const [savedFilename, setSavedFilename] = useState<string | null>(null)
+
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll
@@ -172,8 +179,17 @@ function App() {
     setPlacedAssets(generatePlacedAssets(assets, stops))
   }
 
-  // Fetch opening story line on mount
-  useEffect(() => {
+  const startNewStory = () => {
+    setMessages([])
+    setStoryTurnCount(0)
+    setInput('')
+    setUiMode('chatting')
+    setSavedFilename(null)
+    setPlacedAssets([])
+    if (fadeTimer.current) clearTimeout(fadeTimer.current)
+    setBgBase(buildGradient(DEFAULT_STOPS))
+    setBgIncoming(null)
+
     setLoading(true)
     fetch('/api/hello')
       .then(r => r.json())
@@ -183,6 +199,11 @@ function App() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
+  }
+
+  // Start on mount
+  useEffect(() => {
+    startNewStory()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = async () => {
@@ -210,10 +231,35 @@ function App() {
       if (!data.offTopic) {
         setStoryTurnCount(proposedTurnCount)
       }
+
+      if (data.suggestEnding) {
+        setUiMode('suggest-ending')
+      }
     } catch {
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: 'Oops! Something went wrong. Try again!' },
+      ])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const endStory = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/end-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      })
+      const data = await res.json() as { filename: string; story: string }
+      setSavedFilename(data.filename)
+      setUiMode('ended')
+    } catch {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: 'Oops! Could not save the story. Try again!' },
       ])
     } finally {
       setLoading(false)
@@ -286,20 +332,55 @@ function App() {
           <div ref={bottomRef} />
         </div>
 
-        <div className="input-bar">
-          <input
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Continue the story..."
-            disabled={loading}
-            autoFocus
-          />
-          <button onClick={sendMessage} disabled={loading || !input.trim()}>
-            Send
-          </button>
-        </div>
+        {uiMode === 'chatting' && (
+          <div className="input-bar">
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Continue the story..."
+              disabled={loading}
+              autoFocus
+            />
+            <button onClick={sendMessage} disabled={loading || !input.trim()}>
+              Send
+            </button>
+          </div>
+        )}
+
+        {uiMode === 'suggest-ending' && (
+          <div className="ending-choice">
+            <p className="ending-prompt">✨ Your story is coming to a close!</p>
+            <div className="ending-buttons">
+              <button
+                className="btn-end"
+                onClick={endStory}
+                disabled={loading}
+              >
+                End Story
+              </button>
+              <button
+                className="btn-continue"
+                onClick={() => setUiMode('chatting')}
+                disabled={loading}
+              >
+                Continue Story
+              </button>
+            </div>
+          </div>
+        )}
+
+        {uiMode === 'ended' && (
+          <div className="ending-choice">
+            {savedFilename && (
+              <p className="ending-saved">📖 Saved as <strong>{savedFilename}</strong></p>
+            )}
+            <button className="btn-new-story" onClick={startNewStory}>
+              Start a New Story
+            </button>
+          </div>
+        )}
       </div>
 
     </div>
