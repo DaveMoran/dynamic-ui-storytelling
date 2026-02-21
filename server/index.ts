@@ -340,6 +340,7 @@ app.post('/api/end-story', async (req, res) => {
 
 // ── GET /api/user/:userId/characters ─────────────────────────────────────────
 app.get('/api/user/:userId/characters', async (req, res) => {
+  res.set('Cache-Control', 'no-store')
   const { userId } = req.params
   const characters = await getUserCharacters(userId)
   res.json(characters)
