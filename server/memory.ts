@@ -7,6 +7,7 @@ export interface CharacterSummary {
   description: string
   sessionId: string
   lastPlayed: string // ISO date string
+  storyCount: number
 }
 
 interface ApiMessage {
@@ -151,6 +152,7 @@ export async function getUserCharacters(userId: string): Promise<CharacterSummar
           description: descMatch ? descMatch[1].trim() : '',
           sessionId: mem.session_id ?? '',
           lastPlayed: mem.created_at ?? new Date().toISOString(),
+          storyCount: 0, // populated by caller via getStoryCounts()
         })
       }
     }
@@ -176,9 +178,10 @@ export async function promoteToLongTermMemory(
       body: JSON.stringify({
         memories: [
           {
-            // Include a session snippet so the same character name in different
-            // stories produces distinct entries rather than overwriting.
-            id: `char-${userId}-${sessionId.slice(0, 8)}-${characterName.toLowerCase().replace(/\s+/g, '-')}`,
+            // Stable ID: same character name always maps to the same profile entry,
+            // so each story completion updates (overwrites) the character's description
+            // rather than creating duplicate entries. Story history is tracked separately.
+            id: `char-${userId}-${characterName.toLowerCase().replace(/\s+/g, '-')}`,
             text: `Character: ${characterName}. Description: ${characterDescription}. Story summary: ${storySummary.slice(0, 300)}`,
             memory_type: 'semantic',
             topics: ['character', 'completed-story'],
@@ -191,6 +194,65 @@ export async function promoteToLongTermMemory(
     })
   } catch {
     // Degrade gracefully
+  }
+}
+
+// Save a completed story to long-term memory
+export async function saveStory(
+  userId: string,
+  sessionId: string,
+  characterName: string,
+  title: string,
+  content: string
+): Promise<void> {
+  try {
+    await fetch(`${MEMORY_SERVER}/v1/long-term-memory/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        memories: [{
+          id: `story-${userId}-${sessionId.slice(0, 8)}`,
+          text: `Title: ${title}. Character: ${characterName}. Summary: ${content.slice(0, 500)}`,
+          memory_type: 'semantic',
+          topics: ['story', 'completed-story'],
+          user_id: userId,
+          session_id: sessionId,
+        }],
+        deduplicate: false,
+      }),
+    })
+  } catch {}
+}
+
+// Get story counts keyed by character name for a given user
+export async function getStoryCounts(userId: string): Promise<Record<string, number>> {
+  try {
+    const res = await fetch(`${MEMORY_SERVER}/v1/long-term-memory/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: { eq: userId },
+        topics: { any: ['story'] },
+        limit: 100,
+      }),
+    })
+    if (!res.ok) return {}
+
+    const data = await res.json() as {
+      memories?: Array<{ text: string }>
+    }
+
+    const counts: Record<string, number> = {}
+    for (const mem of (data.memories ?? [])) {
+      const match = mem.text.match(/Character:\s*([^.]+)\./)
+      if (match) {
+        const name = match[1].trim()
+        counts[name] = (counts[name] ?? 0) + 1
+      }
+    }
+    return counts
+  } catch {
+    return {}
   }
 }
 
