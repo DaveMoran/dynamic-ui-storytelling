@@ -6,10 +6,16 @@ interface Message {
   content: string
 }
 
+interface ChatResponse {
+  message: string
+  offTopic: boolean
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [storyTurnCount, setStoryTurnCount] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to latest message
@@ -34,6 +40,7 @@ function App() {
 
     const userMessage: Message = { role: 'user', content: input.trim() }
     const updatedMessages = [...messages, userMessage]
+    const proposedTurnCount = storyTurnCount + 1
 
     setMessages(updatedMessages)
     setInput('')
@@ -43,10 +50,16 @@ function App() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: updatedMessages }),
+        body: JSON.stringify({ messages: updatedMessages, storyTurnCount: proposedTurnCount }),
       })
-      const data = await res.json() as { message: string }
+      const data = await res.json() as ChatResponse
+
       setMessages(prev => [...prev, { role: 'assistant', content: data.message }])
+
+      // Only advance the story turn counter if the user was on-topic
+      if (!data.offTopic) {
+        setStoryTurnCount(proposedTurnCount)
+      }
     } catch {
       setMessages(prev => [
         ...prev,
@@ -68,6 +81,9 @@ function App() {
     <div className="app">
       <header className="app-header">
         <h1>✨ Dynamic Story World</h1>
+        {storyTurnCount > 0 && (
+          <span className="turn-counter">Turn {storyTurnCount} / 20</span>
+        )}
       </header>
 
       <div className="message-feed">
