@@ -140,10 +140,9 @@ export async function getUserCharacters(userId: string): Promise<CharacterSummar
 
     const characters: CharacterSummary[] = []
     for (const mem of (data.memories ?? [])) {
-      // Extract name and description from the memory text
       // Expected format: "Character: {name}. Description: {description}. Story summary: ..."
       const nameMatch = mem.text.match(/Character:\s*([^.]+)\./)
-      const descMatch = mem.text.match(/Description:\s*([^.]+(?:\.[^S][^t][^o])*?)\.?\s*Story summary:/s)
+      const descMatch = mem.text.match(/Description:\s*(.*?)\.\s*Story summary:/s)
         ?? mem.text.match(/Description:\s*(.+?)(?:\.|$)/)
 
       if (nameMatch) {
@@ -177,7 +176,9 @@ export async function promoteToLongTermMemory(
       body: JSON.stringify({
         memories: [
           {
-            id: `char-${userId}-${characterName.toLowerCase().replace(/\s+/g, '-')}`,
+            // Include a session snippet so the same character name in different
+            // stories produces distinct entries rather than overwriting.
+            id: `char-${userId}-${sessionId.slice(0, 8)}-${characterName.toLowerCase().replace(/\s+/g, '-')}`,
             text: `Character: ${characterName}. Description: ${characterDescription}. Story summary: ${storySummary.slice(0, 300)}`,
             memory_type: 'semantic',
             topics: ['character', 'completed-story'],
