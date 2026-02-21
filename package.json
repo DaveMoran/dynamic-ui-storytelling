@@ -1,7 +1,7 @@
 {
   "name": "dynamic-ui-storytelling",
   "private": true,
-  "version": "0.4",
+  "version": "1.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch server/index.ts\"",
@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@langchain/anthropic": "^0.3.34",
     "@langchain/core": "^0.3.0",
     "@langchain/groq": "^0.1.0",
     "cors": "^2.8.5",

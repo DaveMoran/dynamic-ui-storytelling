@@ -126,17 +126,6 @@ function generatePlacedAssets(specs: AssetSpec[], stops: GradientStop[]): Placed
   return placed
 }
 
-/** Average luminance across all gradient stops for contrast detection. */
-function hexLuminance(hex: string): number {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-  if (!result) return 0.5
-  const [r, g, b] = [result[1], result[2], result[3]].map(c => {
-    const s = parseInt(c, 16) / 255
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
-  })
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-
 // ── Default scene (shown while /api/hello loads) ──────────────────────────────
 
 const DEFAULT_STOPS: GradientStop[] = [
@@ -161,7 +150,6 @@ function App() {
 
   // Asset layer
   const [placedAssets, setPlacedAssets] = useState<PlacedAsset[]>([])
-  const [gradientStops, setGradientStops] = useState<GradientStop[]>(DEFAULT_STOPS)
 
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -181,7 +169,6 @@ function App() {
       setBgIncoming(null)
     }, 2200)
 
-    setGradientStops(stops)
     setPlacedAssets(generatePlacedAssets(assets, stops))
   }
 
@@ -240,97 +227,81 @@ function App() {
     }
   }
 
-  // Derive text contrast from current gradient stops
-  const avgLuminance =
-    gradientStops.reduce((sum, s) => sum + hexLuminance(s.color), 0) /
-    Math.max(gradientStops.length, 1)
-  const isDark = avgLuminance < 0.35
-
   return (
-    <div className="scene">
-      {/* Layer 0 — settled background */}
-      <div className="bg-layer" style={{ background: bgBase }} />
+    <div className="app-layout">
 
-      {/* Layer 1 — incoming background (fades in via CSS animation) */}
-      {bgIncoming && (
-        <div
-          key={bgIncoming}
-          className="bg-layer bg-layer-incoming"
-          style={{ background: bgIncoming }}
-        />
-      )}
-
-      {/* Layer 2 — emoji assets */}
-      <div className="asset-layer">
-        {placedAssets.map(asset => (
-          <span
-            key={asset.id}
-            className="scene-asset"
-            style={{
-              left: `${asset.x}%`,
-              top: `${asset.y}%`,
-              fontSize: `${asset.size}rem`,
-            }}
-          >
-            {asset.emoji}
-          </span>
-        ))}
-      </div>
-
-      {/* Layer 3 — chat UI */}
-      <div
-        className="scene-content"
-        style={
-          {
-            '--input-text-color': isDark ? 'rgba(255,255,255,0.92)' : '#1a1a1a',
-            '--input-placeholder-color': isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.38)',
-          } as React.CSSProperties
-        }
-      >
-        <div className="chat-container">
-          <header className="app-header">
-            <h1>✨ Dynamic Story World</h1>
-            {storyTurnCount > 0 && (
-              <span className="turn-counter">Turn {storyTurnCount} / 20</span>
-            )}
-          </header>
-
-          <div className="message-feed">
-            {messages.map((msg, i) => (
-              <div key={i} className={`message ${msg.role}`}>
-                <span className="message-label">
-                  {msg.role === 'user' ? 'You' : 'Story AI'}
-                </span>
-                <p className="message-bubble">{msg.content}</p>
-              </div>
-            ))}
-
-            {loading && (
-              <div className="message assistant">
-                <span className="message-label">Story AI</span>
-                <p className="message-bubble typing">thinking...</p>
-              </div>
-            )}
-
-            <div ref={bottomRef} />
-          </div>
-
-          <div className="input-bar">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Continue the story..."
-              disabled={loading}
-              autoFocus
-            />
-            <button onClick={sendMessage} disabled={loading || !input.trim()}>
-              Send
-            </button>
-          </div>
+      {/* ── Scene area (left, fills remaining width) ── */}
+      <div className="scene-area">
+        <div className="bg-layer" style={{ background: bgBase }} />
+        {bgIncoming && (
+          <div
+            key={bgIncoming}
+            className="bg-layer bg-layer-incoming"
+            style={{ background: bgIncoming }}
+          />
+        )}
+        <div className="asset-layer">
+          {placedAssets.map(asset => (
+            <span
+              key={asset.id}
+              className="scene-asset"
+              style={{
+                left: `${asset.x}%`,
+                top: `${asset.y}%`,
+                fontSize: `${asset.size}rem`,
+              }}
+            >
+              {asset.emoji}
+            </span>
+          ))}
         </div>
       </div>
+
+      {/* ── Chat sidebar (right, fixed width) ── */}
+      <div className="chat-sidebar">
+        <header className="app-header">
+          <h1>✨ Dynamic Story World</h1>
+          {storyTurnCount > 0 && (
+            <span className="turn-counter">Turn {storyTurnCount} / 20</span>
+          )}
+        </header>
+
+        <div className="message-feed">
+          {messages.map((msg, i) => (
+            <div key={i} className={`message ${msg.role}`}>
+              <span className="message-label">
+                {msg.role === 'user' ? 'You' : 'Story AI'}
+              </span>
+              <p className="message-bubble">{msg.content}</p>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="message assistant">
+              <span className="message-label">Story AI</span>
+              <p className="message-bubble typing">thinking...</p>
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="input-bar">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Continue the story..."
+            disabled={loading}
+            autoFocus
+          />
+          <button onClick={sendMessage} disabled={loading || !input.trim()}>
+            Send
+          </button>
+        </div>
+      </div>
+
     </div>
   )
 }

@@ -11,6 +11,10 @@ Children ages 6–12 have vivid imaginations but limited tools that make storyte
 
 ## Versions
 
+### v1.0
+= Finalize setup of screen
+- Initial runthrough of story to see how everything changes.
+
 ### v0.4
 - Ability to use assets via emojis
 - Support for multi-stop backgrounds
