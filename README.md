@@ -11,6 +11,10 @@ Children ages 6–12 have vivid imaginations but limited tools that make storyte
 
 ## Versions
 
+### v0.4
+- Ability to use assets via emojis
+- Support for multi-stop backgrounds
+
 ### V0.3
 - Change background of story based on the prompts from the user
 - Have chat "float" above the story so all elements are visible
