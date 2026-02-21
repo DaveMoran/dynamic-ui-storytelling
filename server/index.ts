@@ -1,8 +1,6 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import fs from 'fs'
-import path from 'path'
 import { ChatGroq } from '@langchain/groq'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
@@ -11,7 +9,9 @@ import {
   putWorkingMemory,
   getWorkingMemory,
   getUserCharacters,
+  getStoryCounts,
   promoteToLongTermMemory,
+  saveStory,
 } from './memory.js'
 
 dotenv.config()
@@ -279,7 +279,12 @@ app.post('/api/chat', async (req, res) => {
   }
 })
 
-// ── POST /api/end-story — clean up and save the story to output/ ──────────────
+function extractTitle(story: string): string {
+  const match = story.match(/^#\s+(.+)$/m)
+  return match ? match[1].trim() : 'Untitled Story'
+}
+
+// ── POST /api/end-story — clean up, generate description, save to Redis ───────
 app.post('/api/end-story', async (req, res) => {
   const { messages, userId, sessionId, characterName, characterDescription } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -296,7 +301,8 @@ app.post('/api/end-story', async (req, res) => {
   try {
     const model = createModel()
 
-    const response = await model.invoke([
+    // Step 1: weave conversation into a clean story
+    const storyResponse = await model.invoke([
       new SystemMessage(
         'You are an editor for children\'s stories. ' +
         'You will receive a collaborative story log between a child and a storytelling AI. ' +
@@ -311,26 +317,34 @@ app.post('/api/end-story', async (req, res) => {
       new HumanMessage(`Here is the story conversation:\n\n${conversationLog}`),
     ])
 
-    const cleanStory = response.content as string
+    const cleanStory = storyResponse.content as string
+    const title = extractTitle(cleanStory)
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const filename = `story-${timestamp}.md`
-    const outputDir = path.join(process.cwd(), 'output')
+    // Step 2: generate a vivid character description from the story
+    let aiDescription = characterDescription ?? ''
+    if (characterName) {
+      try {
+        const descResponse = await model.invoke([
+          new SystemMessage(
+            'You write short character descriptions for a children\'s story app. ' +
+            'Given a story, write a single vivid sentence (max 20 words) describing the main character\'s personality and what makes them special. ' +
+            'Return only the description — no quotes, no preamble.'
+          ),
+          new HumanMessage(
+            `Character name: ${characterName}\n\nStory:\n${cleanStory.slice(0, 1200)}`
+          ),
+        ])
+        const generated = (descResponse.content as string).trim().replace(/^["']|["']$/g, '')
+        if (generated) aiDescription = generated
+      } catch { /* keep existing description on failure */ }
+    }
 
-    await fs.promises.mkdir(outputDir, { recursive: true })
-    await fs.promises.writeFile(path.join(outputDir, filename), cleanStory, 'utf-8')
+    res.json({ title, story: cleanStory, characterDescription: aiDescription })
 
-    res.json({ filename, story: cleanStory })
-
-    // Fire-and-forget: promote character to long-term memory
+    // Fire-and-forget: save story entry + update character profile in Redis
     if (userId && sessionId && characterName) {
-      promoteToLongTermMemory(
-        userId,
-        sessionId,
-        characterName,
-        characterDescription ?? '',
-        cleanStory
-      ).catch(() => {})
+      saveStory(userId, sessionId, characterName, title, cleanStory).catch(() => {})
+      promoteToLongTermMemory(userId, sessionId, characterName, aiDescription, cleanStory).catch(() => {})
     }
   } catch (err) {
     console.error('End story error:', err)
@@ -342,8 +356,19 @@ app.post('/api/end-story', async (req, res) => {
 app.get('/api/user/:userId/characters', async (req, res) => {
   res.set('Cache-Control', 'no-store')
   const { userId } = req.params
-  const characters = await getUserCharacters(userId)
-  res.json(characters)
+  const [characters, storyCounts] = await Promise.all([
+    getUserCharacters(userId),
+    getStoryCounts(userId),
+  ])
+  res.json(characters.map(c => ({ ...c, storyCount: storyCounts[c.name] ?? 0 })))
+})
+
+// ── GET /api/user/:userId/stories ─────────────────────────────────────────────
+app.get('/api/user/:userId/stories', async (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const { userId } = req.params
+  const counts = await getStoryCounts(userId)
+  res.json(counts)
 })
 
 // ── GET /api/session/:sessionId/resume ────────────────────────────────────────
