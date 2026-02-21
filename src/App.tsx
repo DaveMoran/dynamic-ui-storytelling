@@ -231,22 +231,27 @@ function App() {
     }
   }
 
+  // Fetch characters with cache bust, then route to character-select or start fresh
+  const fetchAndShowCharacters = (uid: string) => {
+    fetch(`/api/user/${uid}/characters`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then((chars: CharacterSummary[]) => {
+        if (chars.length > 0) {
+          setAvailableCharacters(chars)
+          setUiMode('character-select')
+        } else {
+          startNewStory()
+        }
+      })
+      .catch(() => startNewStory())
+  }
+
   // On mount: check localStorage for existing userId
   useEffect(() => {
     const storedUserId = localStorage.getItem('storyUserId')
     if (storedUserId) {
       setUserId(storedUserId)
-      fetch(`/api/user/${storedUserId}/characters`)
-        .then(r => r.json())
-        .then((chars: CharacterSummary[]) => {
-          if (chars.length > 0) {
-            setAvailableCharacters(chars)
-            setUiMode('character-select')
-          } else {
-            startNewStory()
-          }
-        })
-        .catch(() => startNewStory())
+      fetchAndShowCharacters(storedUserId)
     }
     // else: stay on welcome screen (default uiMode)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -259,18 +264,7 @@ function App() {
     const newUserId = `${slugify(name)}-${Math.random().toString(36).slice(2, 7)}`
     setUserId(newUserId)
     localStorage.setItem('storyUserId', newUserId)
-
-    fetch(`/api/user/${newUserId}/characters`)
-      .then(r => r.json())
-      .then((chars: CharacterSummary[]) => {
-        if (chars.length > 0) {
-          setAvailableCharacters(chars)
-          setUiMode('character-select')
-        } else {
-          startNewStory()
-        }
-      })
-      .catch(() => startNewStory())
+    fetchAndShowCharacters(newUserId)
   }
 
   const handleContinueMidStory = async (character: CharacterSummary) => {
@@ -361,26 +355,40 @@ function App() {
     }
   }
 
-  // Extract character name from characterContext or first user message
+  // The first user message IS the character's name (verbatim).
+  // For returning characters, fall back to the name embedded in characterContext.
   const deriveCharacterName = (): string | undefined => {
+    const firstUserMsg = messages.find(m => m.role === 'user')?.content?.trim()
+    if (firstUserMsg) return firstUserMsg
     if (characterContext) {
       const match = characterContext.match(/^([^:]+):/)
       if (match) return match[1].trim()
     }
-    // Try to extract from the first user message
-    const firstUser = messages.find(m => m.role === 'user')
-    if (firstUser) {
-      const words = firstUser.content.trim().split(/\s+/)
-      // Heuristic: if the message starts with a capitalised word, use it
-      if (words[0] && /^[A-Z]/.test(words[0])) return words[0]
-    }
     return undefined
+  }
+
+  // Description is whatever follows "Name: " in characterContext, or empty for new chars.
+  const deriveCharacterDescription = (): string => {
+    if (characterContext) {
+      return characterContext.replace(/^[^:]+:\s*/, '').trim()
+    }
+    return ''
+  }
+
+  const handleNewAdventureWithCurrent = () => {
+    const name = deriveCharacterName() ?? ''
+    const description = deriveCharacterDescription()
+    const ctx = description ? `${name}: ${description}` : name || undefined
+    setCharacterContext(ctx)
+    setSessionId(crypto.randomUUID())
+    startNewStory(ctx)
   }
 
   const endStory = async () => {
     setLoading(true)
     try {
       const characterName = deriveCharacterName()
+      const characterDescription = deriveCharacterDescription() || 'a brave adventurer'
       const res = await fetch('/api/end-story', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -389,12 +397,19 @@ function App() {
           userId,
           sessionId,
           characterName,
-          characterContext,
+          characterDescription,
         }),
       })
       const data = await res.json() as { filename: string; story: string }
       setSavedFilename(data.filename)
       setUiMode('ended')
+      // Refresh character list in the background so it's ready if they return to character-select
+      if (userId) {
+        fetch(`/api/user/${userId}/characters`, { cache: 'no-store' })
+          .then(r => r.json())
+          .then((chars: CharacterSummary[]) => { if (chars.length > 0) setAvailableCharacters(chars) })
+          .catch(() => {})
+      }
     } catch {
       setMessages(prev => [
         ...prev,
@@ -579,9 +594,19 @@ function App() {
             {savedFilename && (
               <p className="ending-saved">📖 Saved as <strong>{savedFilename}</strong></p>
             )}
-            <button className="btn-new-story" onClick={handleNewStory}>
-              Start a New Story
-            </button>
+            <p className="ending-prompt">What's next?</p>
+            <div className="ending-buttons">
+              <button className="btn-end" onClick={handleNewAdventureWithCurrent} disabled={loading}>
+                New adventure with {deriveCharacterName() ?? 'this character'}
+              </button>
+              <button
+                className="btn-continue"
+                onClick={() => userId ? fetchAndShowCharacters(userId) : handleNewStory()}
+                disabled={loading}
+              >
+                New character
+              </button>
+            </div>
           </div>
         )}
       </div>
