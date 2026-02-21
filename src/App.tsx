@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
+import {
+  getLocalCharacters,
+  upsertLocalCharacter,
+  saveLocalStory,
+  getLocalStoryCount,
+} from './localStore'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,9 +63,9 @@ interface ChatResponse extends SceneData {
 }
 
 interface CharacterSummary {
+  id: string          // charId — needed to save new stories against the same character
   name: string
-  description: string
-  sessionId: string
+  storyCount: number
   lastPlayed: string
 }
 
@@ -175,11 +181,12 @@ function App() {
 
   // Story ending flow
   const [uiMode, setUiMode] = useState<UIMode>('welcome')
-  const [savedFilename, setSavedFilename] = useState<string | null>(null)
+  const [savedTitle, setSavedTitle] = useState<string | null>(null)
 
   // Memory / identity state
   const [userId, setUserId] = useState('')
-  const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
+  const [characterId, setCharacterId] = useState<string | undefined>()
   const [characterContext, setCharacterContext] = useState<string | undefined>()
   const [availableCharacters, setAvailableCharacters] = useState<CharacterSummary[]>([])
   const [welcomeInput, setWelcomeInput] = useState('')
@@ -210,14 +217,23 @@ function App() {
     setStoryTurnCount(0)
     setInput('')
     setUiMode('chatting')
-    setSavedFilename(null)
+    setSavedTitle(null)
     setPlacedAssets([])
     if (fadeTimer.current) clearTimeout(fadeTimer.current)
     setBgBase(buildGradient(DEFAULT_STOPS))
     setBgIncoming(null)
 
+    // Extract the character name from the context so the greeting can reference them
+    const charName = ctxOverride
+      ? ctxOverride.replace(/:.*$/, '').trim() // "Rosie: desc" → "Rosie"
+      : undefined
+
     setLoading(true)
-    fetch('/api/hello')
+    fetch('/api/hello', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterName: charName }),
+    })
       .then(r => r.json())
       .then((data: HelloResponse) => {
         setMessages([{ role: 'assistant', content: data.message }])
@@ -231,19 +247,30 @@ function App() {
     }
   }
 
-  // Fetch characters with cache bust, then route to character-select or start fresh
+  // Fetch characters with cache bust. Falls back to localStorage if Redis is unavailable.
   const fetchAndShowCharacters = (uid: string) => {
+    const showChars = (chars: CharacterSummary[]) => {
+      setAvailableCharacters(chars)
+      setUiMode('character-select')
+    }
+    const fallbackToLocal = () => {
+      const localChars = getLocalCharacters(uid).map(c => ({
+        id: `local-${slugify(c.name)}`,
+        name: c.name,
+        storyCount: c.storyCount,
+        lastPlayed: c.lastPlayed,
+      }))
+      if (localChars.length > 0) showChars(localChars)
+      else startNewStory()
+    }
+
     fetch(`/api/user/${uid}/characters`, { cache: 'no-store' })
       .then(r => r.json())
       .then((chars: CharacterSummary[]) => {
-        if (chars.length > 0) {
-          setAvailableCharacters(chars)
-          setUiMode('character-select')
-        } else {
-          startNewStory()
-        }
+        if (chars.length > 0) showChars(chars)
+        else fallbackToLocal()
       })
-      .catch(() => startNewStory())
+      .catch(fallbackToLocal)
   }
 
   // On mount: check localStorage for existing userId
@@ -267,44 +294,20 @@ function App() {
     fetchAndShowCharacters(newUserId)
   }
 
-  const handleContinueMidStory = async (character: CharacterSummary) => {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/session/${character.sessionId}/resume`)
-      const data = await res.json() as {
-        messages: Message[]
-        storyTurnCount: number
-        characterContext?: string
-      } | null
-
-      if (data) {
-        setSessionId(character.sessionId)
-        setMessages(data.messages)
-        setStoryTurnCount(data.storyTurnCount)
-        setCharacterContext(data.characterContext)
-        setUiMode('chatting')
-      } else {
-        // Session expired or not found — start fresh with this character
-        const ctx = `${character.name}: ${character.description}`
-        setCharacterContext(ctx)
-        setSessionId(crypto.randomUUID())
-        startNewStory(ctx)
-      }
-    } catch {
-      startNewStory()
-    } finally {
-      setLoading(false)
-    }
+  const handleContinueMidStory = (character: CharacterSummary) => {
+    setCharacterId(character.id)
+    handleNewAdventureWith(character)
   }
 
   const handleNewAdventureWith = (character: CharacterSummary) => {
-    const ctx = `${character.name}: ${character.description}`
-    setCharacterContext(ctx)
+    setCharacterId(character.id)
+    setCharacterContext(character.name)
     setSessionId(crypto.randomUUID())
-    startNewStory(ctx)
+    startNewStory(character.name)
   }
 
   const handleNewStory = () => {
+    setCharacterId(undefined)
     setCharacterContext(undefined)
     setSessionId(crypto.randomUUID())
     startNewStory()
@@ -355,16 +358,15 @@ function App() {
     }
   }
 
-  // The first user message IS the character's name (verbatim).
-  // For returning characters, fall back to the name embedded in characterContext.
+  // For returning characters the name lives in characterContext — always prefer that.
+  // For brand-new characters there is no characterContext, so the first user message IS the name.
   const deriveCharacterName = (): string | undefined => {
-    const firstUserMsg = messages.find(m => m.role === 'user')?.content?.trim()
-    if (firstUserMsg) return firstUserMsg
     if (characterContext) {
       const match = characterContext.match(/^([^:]+):/)
       if (match) return match[1].trim()
+      return characterContext.trim()
     }
-    return undefined
+    return messages.find(m => m.role === 'user')?.content?.trim()
   }
 
   // Description is whatever follows "Name: " in characterContext, or empty for new chars.
@@ -376,9 +378,9 @@ function App() {
   }
 
   const handleNewAdventureWithCurrent = () => {
+    setCharacterId(undefined)
     const name = deriveCharacterName() ?? ''
-    const description = deriveCharacterDescription()
-    const ctx = description ? `${name}: ${description}` : name || undefined
+    const ctx = name || undefined
     setCharacterContext(ctx)
     setSessionId(crypto.randomUUID())
     startNewStory(ctx)
@@ -398,12 +400,35 @@ function App() {
           sessionId,
           characterName,
           characterDescription,
+          characterId,
         }),
       })
-      const data = await res.json() as { filename: string; story: string }
-      setSavedFilename(data.filename)
+      const data = await res.json() as { title: string; story: string; characterDescription: string; characterId?: string }
+      setSavedTitle(data.title)
+      if (data.characterId) setCharacterId(data.characterId)
       setUiMode('ended')
-      // Refresh character list in the background so it's ready if they return to character-select
+
+      // Write to localStorage as a fallback for when Redis is unavailable
+      const charName = deriveCharacterName() ?? ''
+      if (userId && charName) {
+        const newStoryCount = getLocalStoryCount(userId, charName) + 1
+        upsertLocalCharacter(userId, {
+          name: charName,
+          description: data.characterDescription,
+          sessionId,
+          lastPlayed: new Date().toISOString(),
+          storyCount: newStoryCount,
+        })
+        saveLocalStory(userId, {
+          id: data.characterId ? `story-${data.characterId.slice(0, 8)}` : `story-${sessionId.slice(0, 8)}`,
+          characterName: charName,
+          title: data.title,
+          content: data.story.slice(0, 500),
+          savedAt: new Date().toISOString(),
+        })
+      }
+
+      // Refresh Redis character list in the background
       if (userId) {
         fetch(`/api/user/${userId}/characters`, { cache: 'no-store' })
           .then(r => r.json())
@@ -496,10 +521,14 @@ function App() {
             <p className="character-select-heading">Welcome back! Pick an adventure:</p>
             <div className="character-list">
               {availableCharacters.map(char => (
-                <div key={char.sessionId} className="character-card">
+                <div key={char.id} className="character-card">
                   <div className="character-card-info">
-                    <span className="character-card-name">{char.name}</span>
-                    <span className="character-card-desc">{char.description}</span>
+                    <div className="character-card-header">
+                      <span className="character-card-name">{char.name}</span>
+                      <span className="story-count-badge">
+                        {char.storyCount} {char.storyCount === 1 ? 'story' : 'stories'}
+                      </span>
+                    </div>
                     <span className="character-card-date">Last played: {formatDate(char.lastPlayed)}</span>
                   </div>
                   <div className="character-card-actions">
@@ -591,8 +620,8 @@ function App() {
 
         {uiMode === 'ended' && (
           <div className="ending-choice">
-            {savedFilename && (
-              <p className="ending-saved">📖 Saved as <strong>{savedFilename}</strong></p>
+            {savedTitle && (
+              <p className="ending-saved">📖 <strong>"{savedTitle}"</strong> has been saved!</p>
             )}
             <p className="ending-prompt">What's next?</p>
             <div className="ending-buttons">

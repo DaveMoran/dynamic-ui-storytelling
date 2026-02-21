@@ -1,18 +1,12 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import fs from 'fs'
-import path from 'path'
 import { ChatGroq } from '@langchain/groq'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
 import { z } from 'zod'
-import {
-  putWorkingMemory,
-  getWorkingMemory,
-  getUserCharacters,
-  promoteToLongTermMemory,
-} from './memory.js'
+import { putWorkingMemory, getWorkingMemory } from './memory.js'
+import { findOrCreateCharacter, getUserCharacters, saveStory, getStoriesForCharacter } from './redis.js'
 
 dotenv.config()
 
@@ -217,20 +211,29 @@ function createModel(): any {
   })
 }
 
-// ── GET /api/hello ────────────────────────────────────────────────────────────
-app.get('/api/hello', async (_req, res) => {
+// ── POST /api/hello ───────────────────────────────────────────────────────────
+app.post('/api/hello', async (req, res) => {
+  const { characterName } = req.body as { characterName?: string }
+
+  const systemPrompt = characterName
+    ? 'You are a friendly storytelling assistant for children ages 6–12. ' +
+      `The child is returning to play with their character "${characterName}". ` +
+      `Ask them ONE short, enthusiastic question about what adventure ${characterName} will go on today. ` +
+      'Make it feel exciting and personalised — reference the character\'s name. Keep it to 1 sentence. ' +
+      'For the scene, return a warm welcoming scene (bright sunny meadow) using the hard-line gradient technique. ' +
+      'Include a few friendly nature emojis — nothing story-specific yet.'
+    : 'You are a friendly storytelling assistant for children ages 6–12. ' +
+      'Your job right now is to warmly welcome the child and ask them ONE simple question: ' +
+      'what is the name of their character? ' +
+      'Keep it to 1 short, enthusiastic sentence — make it feel exciting to answer! ' +
+      'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
+      'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
+
   try {
     const model = createModel().withStructuredOutput(HelloResponse)
 
     const response: HelloResponseType = await model.invoke([
-      new SystemMessage(
-        'You are a friendly storytelling assistant for children ages 6–12. ' +
-        'Your job right now is to warmly welcome the child and ask them ONE simple question: ' +
-        'what is the name of their character? ' +
-        'Keep it to 1 short, enthusiastic sentence — make it feel exciting to answer! ' +
-        'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
-        'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
-      ),
+      new SystemMessage(systemPrompt),
       new HumanMessage('Start the session.'),
     ])
 
@@ -279,14 +282,20 @@ app.post('/api/chat', async (req, res) => {
   }
 })
 
-// ── POST /api/end-story — clean up and save the story to output/ ──────────────
+function extractTitle(story: string): string {
+  const match = story.match(/^#\s+(.+)$/m)
+  return match ? match[1].trim() : 'Untitled Story'
+}
+
+// ── POST /api/end-story — clean up, generate description, save to Redis ───────
 app.post('/api/end-story', async (req, res) => {
-  const { messages, userId, sessionId, characterName, characterDescription } = req.body as {
+  const { messages, userId, sessionId, characterName, characterDescription, characterId: incomingCharId } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
     userId?: string
     sessionId?: string
     characterName?: string
     characterDescription?: string
+    characterId?: string
   }
 
   const conversationLog = messages
@@ -296,7 +305,8 @@ app.post('/api/end-story', async (req, res) => {
   try {
     const model = createModel()
 
-    const response = await model.invoke([
+    // Step 1: weave conversation into a clean story
+    const storyResponse = await model.invoke([
       new SystemMessage(
         'You are an editor for children\'s stories. ' +
         'You will receive a collaborative story log between a child and a storytelling AI. ' +
@@ -311,27 +321,43 @@ app.post('/api/end-story', async (req, res) => {
       new HumanMessage(`Here is the story conversation:\n\n${conversationLog}`),
     ])
 
-    const cleanStory = response.content as string
+    const cleanStory = storyResponse.content as string
+    const title = extractTitle(cleanStory)
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const filename = `story-${timestamp}.md`
-    const outputDir = path.join(process.cwd(), 'output')
-
-    await fs.promises.mkdir(outputDir, { recursive: true })
-    await fs.promises.writeFile(path.join(outputDir, filename), cleanStory, 'utf-8')
-
-    res.json({ filename, story: cleanStory })
-
-    // Fire-and-forget: promote character to long-term memory
-    if (userId && sessionId && characterName) {
-      promoteToLongTermMemory(
-        userId,
-        sessionId,
-        characterName,
-        characterDescription ?? '',
-        cleanStory
-      ).catch(() => {})
+    // Step 2: generate a vivid character description from the story
+    let aiDescription = characterDescription ?? ''
+    if (characterName) {
+      try {
+        const descResponse = await model.invoke([
+          new SystemMessage(
+            'You write short character descriptions for a children\'s story app. ' +
+            'Given a story, write a single vivid sentence (max 20 words) describing the main character\'s personality and what makes them special. ' +
+            'Return only the description — no quotes, no preamble.'
+          ),
+          new HumanMessage(
+            `Character name: ${characterName}\n\nStory:\n${cleanStory.slice(0, 1200)}`
+          ),
+        ])
+        const generated = (descResponse.content as string).trim().replace(/^["']|["']$/g, '')
+        if (generated) aiDescription = generated
+      } catch { /* keep existing description on failure */ }
     }
+
+    // Save character + story to Redis before responding
+    let charId: string | undefined = incomingCharId
+    if (userId && characterName) {
+      try {
+        const char = await findOrCreateCharacter(userId, characterName)
+        if (char) {
+          charId = char.id
+          await saveStory(userId, char.id, characterName, title, cleanStory)
+        }
+      } catch (saveErr) {
+        console.error('Redis save error (non-fatal):', saveErr)
+      }
+    }
+
+    res.json({ title, story: cleanStory, characterDescription: aiDescription, characterId: charId })
   } catch (err) {
     console.error('End story error:', err)
     res.status(500).json({ error: 'Failed to save story' })
@@ -344,6 +370,14 @@ app.get('/api/user/:userId/characters', async (req, res) => {
   const { userId } = req.params
   const characters = await getUserCharacters(userId)
   res.json(characters)
+})
+
+// ── GET /api/character/:characterId/stories ───────────────────────────────────
+app.get('/api/character/:characterId/stories', async (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const { characterId } = req.params
+  const stories = await getStoriesForCharacter(characterId)
+  res.json(stories)
 })
 
 // ── GET /api/session/:sessionId/resume ────────────────────────────────────────

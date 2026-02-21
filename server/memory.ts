@@ -2,13 +2,6 @@ import { v4 as uuidv4 } from 'uuid'
 
 const MEMORY_SERVER = process.env.MEMORY_SERVER_URL ?? 'http://localhost:8000'
 
-export interface CharacterSummary {
-  name: string
-  description: string
-  sessionId: string
-  lastPlayed: string // ISO date string
-}
-
 interface ApiMessage {
   id: string
   role: 'user' | 'assistant'
@@ -16,7 +9,7 @@ interface ApiMessage {
   created_at: string
 }
 
-interface AppMessage {
+export interface AppMessage {
   role: 'user' | 'assistant'
   content: string
 }
@@ -30,7 +23,8 @@ function toApiMessages(messages: AppMessage[]): ApiMessage[] {
   }))
 }
 
-// Store/update working memory after each chat turn (fire-and-forget)
+// ── Working memory (session-scoped) ───────────────────────────────────────────
+
 export async function putWorkingMemory(
   sessionId: string,
   userId: string,
@@ -72,11 +66,10 @@ export async function putWorkingMemory(
       }),
     })
   } catch {
-    // Degrade gracefully — memory server may be unavailable
+    // Degrade gracefully
   }
 }
 
-// Retrieve working memory to resume a session
 export async function getWorkingMemory(sessionId: string): Promise<{
   messages: AppMessage[]
   storyTurnCount: number
@@ -115,84 +108,7 @@ export async function getWorkingMemory(sessionId: string): Promise<{
   }
 }
 
-// Search long-term memory for a user's characters
-export async function getUserCharacters(userId: string): Promise<CharacterSummary[]> {
-  try {
-    // No `text` field → filter-only listing, no semantic/embedding search needed
-    const res = await fetch(`${MEMORY_SERVER}/v1/long-term-memory/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: { eq: userId },
-        topics: { any: ['character'] },
-        limit: 20,
-      }),
-    })
-    if (!res.ok) return []
-
-    const data = await res.json() as {
-      memories?: Array<{
-        text: string
-        session_id?: string
-        created_at?: string
-      }>
-    }
-
-    const characters: CharacterSummary[] = []
-    for (const mem of (data.memories ?? [])) {
-      // Expected format: "Character: {name}. Description: {description}. Story summary: ..."
-      const nameMatch = mem.text.match(/Character:\s*([^.]+)\./)
-      const descMatch = mem.text.match(/Description:\s*(.*?)\.\s*Story summary:/s)
-        ?? mem.text.match(/Description:\s*(.+?)(?:\.|$)/)
-
-      if (nameMatch) {
-        characters.push({
-          name: nameMatch[1].trim(),
-          description: descMatch ? descMatch[1].trim() : '',
-          sessionId: mem.session_id ?? '',
-          lastPlayed: mem.created_at ?? new Date().toISOString(),
-        })
-      }
-    }
-
-    return characters
-  } catch {
-    return []
-  }
-}
-
-// Promote completed story's character to long-term memory
-export async function promoteToLongTermMemory(
-  userId: string,
-  sessionId: string,
-  characterName: string,
-  characterDescription: string,
-  storySummary: string
-): Promise<void> {
-  try {
-    await fetch(`${MEMORY_SERVER}/v1/long-term-memory/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        memories: [
-          {
-            // Include a session snippet so the same character name in different
-            // stories produces distinct entries rather than overwriting.
-            id: `char-${userId}-${sessionId.slice(0, 8)}-${characterName.toLowerCase().replace(/\s+/g, '-')}`,
-            text: `Character: ${characterName}. Description: ${characterDescription}. Story summary: ${storySummary.slice(0, 300)}`,
-            memory_type: 'semantic',
-            topics: ['character', 'completed-story'],
-            user_id: userId,
-            session_id: sessionId,
-          },
-        ],
-        deduplicate: false,
-      }),
-    })
-  } catch {
-    // Degrade gracefully
-  }
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getPhaseLabel(turn: number): string {
   if (turn <= 1) return 'LAUNCH'
