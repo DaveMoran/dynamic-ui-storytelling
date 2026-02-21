@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { ChatGroq } from '@langchain/groq'
+import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
 import { z } from 'zod'
 
@@ -177,7 +178,17 @@ function recoverFromFailedGeneration<T>(err: unknown, schema: z.ZodType<T>): T |
   }
 }
 
-function createModel() {
+const ACTIVE_PROVIDER = process.env.ANTHROPIC_API_KEY ? 'anthropic' : 'groq'
+console.log(`Using provider: ${ACTIVE_PROVIDER}`)
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createModel(): any {
+  if (ACTIVE_PROVIDER === 'anthropic') {
+    return new ChatAnthropic({
+      model: 'claude-haiku-4-5-20251001',
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    })
+  }
   return new ChatGroq({
     model: 'llama-3.3-70b-versatile',
     apiKey: process.env.GROQ_API_KEY,
