@@ -5,14 +5,8 @@ import { ChatGroq } from '@langchain/groq'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
 import { z } from 'zod'
-import {
-  putWorkingMemory,
-  getWorkingMemory,
-  getUserCharacters,
-  saveCharacter,
-  saveStory,
-  getStoriesForUser,
-} from './memory.js'
+import { putWorkingMemory, getWorkingMemory } from './memory.js'
+import { findOrCreateCharacter, getUserCharacters, saveStory, getStoriesForCharacter } from './redis.js'
 
 dotenv.config()
 
@@ -295,12 +289,13 @@ function extractTitle(story: string): string {
 
 // ── POST /api/end-story — clean up, generate description, save to Redis ───────
 app.post('/api/end-story', async (req, res) => {
-  const { messages, userId, sessionId, characterName, characterDescription } = req.body as {
+  const { messages, userId, sessionId, characterName, characterDescription, characterId: incomingCharId } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
     userId?: string
     sessionId?: string
     characterName?: string
     characterDescription?: string
+    characterId?: string
   }
 
   const conversationLog = messages
@@ -348,13 +343,21 @@ app.post('/api/end-story', async (req, res) => {
       } catch { /* keep existing description on failure */ }
     }
 
-    res.json({ title, story: cleanStory, characterDescription: aiDescription })
-
-    // Fire-and-forget: save character entry and story entry separately
-    if (userId && sessionId && characterName) {
-      saveCharacter(userId, sessionId, characterName, aiDescription).catch(() => {})
-      saveStory(userId, sessionId, characterName, title, cleanStory).catch(() => {})
+    // Save character + story to Redis before responding
+    let charId: string | undefined = incomingCharId
+    if (userId && characterName) {
+      try {
+        const char = await findOrCreateCharacter(userId, characterName)
+        if (char) {
+          charId = char.id
+          await saveStory(userId, char.id, characterName, title, cleanStory)
+        }
+      } catch (saveErr) {
+        console.error('Redis save error (non-fatal):', saveErr)
+      }
     }
+
+    res.json({ title, story: cleanStory, characterDescription: aiDescription, characterId: charId })
   } catch (err) {
     console.error('End story error:', err)
     res.status(500).json({ error: 'Failed to save story' })
@@ -369,11 +372,11 @@ app.get('/api/user/:userId/characters', async (req, res) => {
   res.json(characters)
 })
 
-// ── GET /api/user/:userId/stories ────────────────────────────────────────────
-app.get('/api/user/:userId/stories', async (req, res) => {
+// ── GET /api/character/:characterId/stories ───────────────────────────────────
+app.get('/api/character/:characterId/stories', async (req, res) => {
   res.set('Cache-Control', 'no-store')
-  const { userId } = req.params
-  const stories = await getStoriesForUser(userId)
+  const { characterId } = req.params
+  const stories = await getStoriesForCharacter(characterId)
   res.json(stories)
 })
 

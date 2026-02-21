@@ -63,11 +63,10 @@ interface ChatResponse extends SceneData {
 }
 
 interface CharacterSummary {
+  id: string          // charId — needed to save new stories against the same character
   name: string
-  description: string
-  sessionId: string
-  lastPlayed: string
   storyCount: number
+  lastPlayed: string
 }
 
 type UIMode = 'welcome' | 'character-select' | 'chatting' | 'suggest-ending' | 'ended'
@@ -187,6 +186,7 @@ function App() {
   // Memory / identity state
   const [userId, setUserId] = useState('')
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
+  const [characterId, setCharacterId] = useState<string | undefined>()
   const [characterContext, setCharacterContext] = useState<string | undefined>()
   const [availableCharacters, setAvailableCharacters] = useState<CharacterSummary[]>([])
   const [welcomeInput, setWelcomeInput] = useState('')
@@ -254,7 +254,12 @@ function App() {
       setUiMode('character-select')
     }
     const fallbackToLocal = () => {
-      const localChars = getLocalCharacters(uid).map(c => ({ ...c }))
+      const localChars = getLocalCharacters(uid).map(c => ({
+        id: `local-${slugify(c.name)}`,
+        name: c.name,
+        storyCount: c.storyCount,
+        lastPlayed: c.lastPlayed,
+      }))
       if (localChars.length > 0) showChars(localChars)
       else startNewStory()
     }
@@ -289,44 +294,20 @@ function App() {
     fetchAndShowCharacters(newUserId)
   }
 
-  const handleContinueMidStory = async (character: CharacterSummary) => {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/session/${character.sessionId}/resume`)
-      const data = await res.json() as {
-        messages: Message[]
-        storyTurnCount: number
-        characterContext?: string
-      } | null
-
-      if (data) {
-        setSessionId(character.sessionId)
-        setMessages(data.messages)
-        setStoryTurnCount(data.storyTurnCount)
-        setCharacterContext(data.characterContext)
-        setUiMode('chatting')
-      } else {
-        // Session expired or not found — start fresh with this character
-        const ctx = `${character.name}: ${character.description}`
-        setCharacterContext(ctx)
-        setSessionId(crypto.randomUUID())
-        startNewStory(ctx)
-      }
-    } catch {
-      startNewStory()
-    } finally {
-      setLoading(false)
-    }
+  const handleContinueMidStory = (character: CharacterSummary) => {
+    setCharacterId(character.id)
+    handleNewAdventureWith(character)
   }
 
   const handleNewAdventureWith = (character: CharacterSummary) => {
-    const ctx = `${character.name}: ${character.description}`
-    setCharacterContext(ctx)
+    setCharacterId(character.id)
+    setCharacterContext(character.name)
     setSessionId(crypto.randomUUID())
-    startNewStory(ctx)
+    startNewStory(character.name)
   }
 
   const handleNewStory = () => {
+    setCharacterId(undefined)
     setCharacterContext(undefined)
     setSessionId(crypto.randomUUID())
     startNewStory()
@@ -397,9 +378,9 @@ function App() {
   }
 
   const handleNewAdventureWithCurrent = () => {
+    setCharacterId(undefined)
     const name = deriveCharacterName() ?? ''
-    const description = deriveCharacterDescription()
-    const ctx = description ? `${name}: ${description}` : name || undefined
+    const ctx = name || undefined
     setCharacterContext(ctx)
     setSessionId(crypto.randomUUID())
     startNewStory(ctx)
@@ -419,10 +400,12 @@ function App() {
           sessionId,
           characterName,
           characterDescription,
+          characterId,
         }),
       })
-      const data = await res.json() as { title: string; story: string; characterDescription: string }
+      const data = await res.json() as { title: string; story: string; characterDescription: string; characterId?: string }
       setSavedTitle(data.title)
+      if (data.characterId) setCharacterId(data.characterId)
       setUiMode('ended')
 
       // Write to localStorage as a fallback for when Redis is unavailable
@@ -437,7 +420,7 @@ function App() {
           storyCount: newStoryCount,
         })
         saveLocalStory(userId, {
-          id: `story-${sessionId.slice(0, 8)}`,
+          id: data.characterId ? `story-${data.characterId.slice(0, 8)}` : `story-${sessionId.slice(0, 8)}`,
           characterName: charName,
           title: data.title,
           content: data.story.slice(0, 500),
@@ -538,7 +521,7 @@ function App() {
             <p className="character-select-heading">Welcome back! Pick an adventure:</p>
             <div className="character-list">
               {availableCharacters.map(char => (
-                <div key={char.sessionId} className="character-card">
+                <div key={char.id} className="character-card">
                   <div className="character-card-info">
                     <div className="character-card-header">
                       <span className="character-card-name">{char.name}</span>
@@ -546,9 +529,6 @@ function App() {
                         {char.storyCount} {char.storyCount === 1 ? 'story' : 'stories'}
                       </span>
                     </div>
-                    {char.description && (
-                      <span className="character-card-desc">{char.description}</span>
-                    )}
                     <span className="character-card-date">Last played: {formatDate(char.lastPlayed)}</span>
                   </div>
                   <div className="character-card-actions">
