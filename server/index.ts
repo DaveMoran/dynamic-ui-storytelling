@@ -131,14 +131,32 @@ ${getPhaseInstructions(storyTurnCount)}`
  * extracts that output, coerces the known numeric fields, and re-validates with Zod.
  */
 function recoverFromFailedGeneration<T>(err: unknown, schema: z.ZodType<T>): T | null {
-  const raw: string | undefined = (err as any)?.error?.failed_generation
+  const raw: string | undefined =
+    (err as any)?.error?.failed_generation ??
+    (err as any)?.error?.error?.failed_generation
   if (!raw) return null
 
   const match = raw.match(/<function=\w+>([\s\S]+?)\s*<\/function>/)
   if (!match) return null
 
   try {
-    const parsed = JSON.parse(match[1])
+    let parsed = JSON.parse(match[1])
+
+    // Some Groq responses wrap the payload in {type, name, parameters: {...}}
+    if (parsed.parameters && typeof parsed.parameters === 'object') {
+      parsed = parsed.parameters
+    }
+
+    // Groq sometimes returns arrays/booleans as JSON strings — unwrap them
+    if (typeof parsed.gradientStops === 'string') {
+      parsed.gradientStops = JSON.parse(parsed.gradientStops)
+    }
+    if (typeof parsed.assets === 'string') {
+      parsed.assets = JSON.parse(parsed.assets)
+    }
+    if (typeof parsed.offTopic === 'string') {
+      parsed.offTopic = parsed.offTopic === 'true'
+    }
 
     if (Array.isArray(parsed.gradientStops)) {
       parsed.gradientStops = parsed.gradientStops.map((s: any) => ({
@@ -201,9 +219,9 @@ app.post('/api/chat', async (req, res) => {
   try {
     const model = createModel().withStructuredOutput(StoryResponse)
 
-    const langchainMessages = messages.map(m =>
-      m.role === 'user' ? new HumanMessage(m.content) : new AIMessage(m.content)
-    )
+    const langchainMessages = messages
+      .filter(m => m.content != null && m.content !== '')
+      .map(m => m.role === 'user' ? new HumanMessage(m.content) : new AIMessage(m.content))
 
     const response: StoryResponseType = await model.invoke([
       new SystemMessage(buildSystemPrompt(storyTurnCount)),
