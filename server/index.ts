@@ -217,20 +217,29 @@ function createModel(): any {
   })
 }
 
-// ── GET /api/hello ────────────────────────────────────────────────────────────
-app.get('/api/hello', async (_req, res) => {
+// ── POST /api/hello ───────────────────────────────────────────────────────────
+app.post('/api/hello', async (req, res) => {
+  const { characterName } = req.body as { characterName?: string }
+
+  const systemPrompt = characterName
+    ? 'You are a friendly storytelling assistant for children ages 6–12. ' +
+      `The child is returning to play with their character "${characterName}". ` +
+      `Ask them ONE short, enthusiastic question about what adventure ${characterName} will go on today. ` +
+      'Make it feel exciting and personalised — reference the character\'s name. Keep it to 1 sentence. ' +
+      'For the scene, return a warm welcoming scene (bright sunny meadow) using the hard-line gradient technique. ' +
+      'Include a few friendly nature emojis — nothing story-specific yet.'
+    : 'You are a friendly storytelling assistant for children ages 6–12. ' +
+      'Your job right now is to warmly welcome the child and ask them ONE simple question: ' +
+      'what is the name of their character? ' +
+      'Keep it to 1 short, enthusiastic sentence — make it feel exciting to answer! ' +
+      'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
+      'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
+
   try {
     const model = createModel().withStructuredOutput(HelloResponse)
 
     const response: HelloResponseType = await model.invoke([
-      new SystemMessage(
-        'You are a friendly storytelling assistant for children ages 6–12. ' +
-        'Your job right now is to warmly welcome the child and ask them ONE simple question: ' +
-        'what is the name of their character? ' +
-        'Keep it to 1 short, enthusiastic sentence — make it feel exciting to answer! ' +
-        'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
-        'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
-      ),
+      new SystemMessage(systemPrompt),
       new HumanMessage('Start the session.'),
     ])
 
