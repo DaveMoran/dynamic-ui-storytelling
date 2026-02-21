@@ -1,6 +1,8 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import fs from 'fs'
+import path from 'path'
 import { ChatGroq } from '@langchain/groq'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
@@ -50,6 +52,13 @@ const StoryResponse = z.object({
   offTopic: z
     .boolean()
     .describe('true ONLY if the user input was unrelated to the story and was redirected'),
+  suggestEnding: z
+    .boolean()
+    .describe(
+      'true if the user\'s message naturally concludes the story — they write "the end", ' +
+      '"happily ever after", a clear closing sentence, or all story threads feel resolved. ' +
+      'Can happen at any turn. The user will be offered a choice to end or keep going.'
+    ),
   gradientStops: z.array(GradientStop),
   assets: z.array(AssetSpec),
 })
@@ -85,7 +94,8 @@ STORY RULES:
 3. ENDINGS: Always happy or hopeful. Never sad, scary, or bad.
 4. OFF-TOPIC: If the user goes off-topic, set offTopic=true and redirect them with: "Oops! Let's get back to our story! [one recap sentence]." Do not count this turn.
 5. STORY INPUT: Embrace silly or unexpected ideas. Set offTopic=false.
-6. CONTINUATION: Read the FULL conversation history above. Your response must directly continue from the last story beat — reference the characters, locations, and events already established, and naturally weave in the user's latest message as the next moment in the ongoing story. Never restart or ignore what came before.
+6. NATURAL ENDING: If the user's message signals the story has reached a natural conclusion — they write "the end", "happily ever after", a clear closing sentence, or all plot threads feel resolved — set suggestEnding=true. This can happen at any turn. Otherwise always set suggestEnding=false.
+7. CONTINUATION: Read the FULL conversation history above. Your response must directly continue from the last story beat — reference the characters, locations, and events already established, and naturally weave in the user's latest message as the next moment in the ongoing story. Never restart or ignore what came before.
 
 SCENE DESIGN — return gradientStops (3–5 stops) and assets (2–5 items):
 
@@ -157,6 +167,9 @@ function recoverFromFailedGeneration<T>(err: unknown, schema: z.ZodType<T>): T |
     }
     if (typeof parsed.offTopic === 'string') {
       parsed.offTopic = parsed.offTopic === 'true'
+    }
+    if (typeof parsed.suggestEnding === 'string') {
+      parsed.suggestEnding = parsed.suggestEnding === 'true'
     }
 
     if (Array.isArray(parsed.gradientStops)) {
@@ -246,6 +259,50 @@ app.post('/api/chat', async (req, res) => {
     if (recovered) { res.json(recovered); return }
     console.error('Groq error:', err)
     res.status(500).json({ error: 'Failed to generate response' })
+  }
+})
+
+// ── POST /api/end-story — clean up and save the story to output/ ──────────────
+app.post('/api/end-story', async (req, res) => {
+  const { messages } = req.body as {
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>
+  }
+
+  const conversationLog = messages
+    .map(m => `${m.role === 'user' ? 'Child' : 'Story'}:\n${m.content}`)
+    .join('\n\n')
+
+  try {
+    const model = createModel()
+
+    const response = await model.invoke([
+      new SystemMessage(
+        'You are an editor for children\'s stories. ' +
+        'You will receive a collaborative story log between a child and a storytelling AI. ' +
+        'Your job:\n' +
+        '1. Weave all story parts into a single flowing narrative — keep the child\'s ideas and characters\n' +
+        '2. Remove all meta-commentary, off-topic exchanges, and AI instructions\n' +
+        '3. Write a creative title at the top (# Title)\n' +
+        '4. Format as clean markdown with natural paragraphs\n' +
+        '5. End with "✨ The End ✨"\n' +
+        '6. Aim for 200–400 words. Keep it fun, vivid, and child-appropriate.'
+      ),
+      new HumanMessage(`Here is the story conversation:\n\n${conversationLog}`),
+    ])
+
+    const cleanStory = response.content as string
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const filename = `story-${timestamp}.md`
+    const outputDir = path.join(process.cwd(), 'output')
+
+    await fs.promises.mkdir(outputDir, { recursive: true })
+    await fs.promises.writeFile(path.join(outputDir, filename), cleanStory, 'utf-8')
+
+    res.json({ filename, story: cleanStory })
+  } catch (err) {
+    console.error('End story error:', err)
+    res.status(500).json({ error: 'Failed to save story' })
   }
 })
 
