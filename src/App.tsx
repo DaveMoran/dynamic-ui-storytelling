@@ -231,10 +231,35 @@ function App() {
       if (!data.offTopic) {
         setStoryTurnCount(proposedTurnCount)
       }
+
+      if (data.suggestEnding) {
+        setUiMode('suggest-ending')
+      }
     } catch {
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: 'Oops! Something went wrong. Try again!' },
+      ])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const endStory = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/end-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      })
+      const data = await res.json() as { filename: string; story: string }
+      setSavedFilename(data.filename)
+      setUiMode('ended')
+    } catch {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: 'Oops! Could not save the story. Try again!' },
       ])
     } finally {
       setLoading(false)
@@ -307,20 +332,55 @@ function App() {
           <div ref={bottomRef} />
         </div>
 
-        <div className="input-bar">
-          <input
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Continue the story..."
-            disabled={loading}
-            autoFocus
-          />
-          <button onClick={sendMessage} disabled={loading || !input.trim()}>
-            Send
-          </button>
-        </div>
+        {uiMode === 'chatting' && (
+          <div className="input-bar">
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Continue the story..."
+              disabled={loading}
+              autoFocus
+            />
+            <button onClick={sendMessage} disabled={loading || !input.trim()}>
+              Send
+            </button>
+          </div>
+        )}
+
+        {uiMode === 'suggest-ending' && (
+          <div className="ending-choice">
+            <p className="ending-prompt">✨ Your story is coming to a close!</p>
+            <div className="ending-buttons">
+              <button
+                className="btn-end"
+                onClick={endStory}
+                disabled={loading}
+              >
+                End Story
+              </button>
+              <button
+                className="btn-continue"
+                onClick={() => setUiMode('chatting')}
+                disabled={loading}
+              >
+                Continue Story
+              </button>
+            </div>
+          </div>
+        )}
+
+        {uiMode === 'ended' && (
+          <div className="ending-choice">
+            {savedFilename && (
+              <p className="ending-saved">📖 Saved as <strong>{savedFilename}</strong></p>
+            )}
+            <button className="btn-new-story" onClick={startNewStory}>
+              Start a New Story
+            </button>
+          </div>
+        )}
       </div>
 
     </div>
