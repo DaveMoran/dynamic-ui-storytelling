@@ -71,3 +71,7 @@ export default defineConfig([
   },
 ])
 ```
+
+## Versions
+### v0.0
+- Initial scaffolding from vite react
