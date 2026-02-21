@@ -14,6 +14,7 @@ app.use(express.json())
 // ── Shared sub-schemas ────────────────────────────────────────────────────────
 
 const ZONES = ['sky', 'ground', 'water', 'underground', 'space'] as const
+const SIZES = ['xs', 'sm', 'md', 'lg', 'xl'] as const
 
 const GradientStop = z.object({
   color: z.string().describe('CSS hex color e.g. #87CEEB'),
@@ -24,7 +25,15 @@ const GradientStop = z.object({
 const AssetSpec = z.object({
   emoji: z.string().describe('A single emoji character'),
   zone: z.enum(ZONES).describe('Zone to place this emoji in'),
-  count: z.number().int().min(1).max(5).describe('Integer count 1–5 (a number, NOT a string)'),
+  count: z.number().int().min(1).max(10).describe(
+    'Integer count 1–10 (a number, NOT a string). ' +
+    'Use 1–2 for singletons (sun, moon, castle). Use 5–10 for dense groups (forest, starfield, flower field).'
+  ),
+  size: z.enum(SIZES).describe(
+    'Visual size of each emoji — convey narrative scale: ' +
+    'xs=tiny/miniature, sm=small, md=normal (default), lg=big/tall, xl=enormous/massive. ' +
+    'Example: "tiny rabbit" → xs, "tall oak" → lg, "massive ancient tree" → xl.'
+  ),
 })
 
 // ── Response schemas ──────────────────────────────────────────────────────────
@@ -93,7 +102,17 @@ EMOJI ASSETS (choose from these only):
   underground → 💎 🔮 🦇 🍂 🌑 🪨 🕯️
   space      → 🌟 ⭐ 🪐 🚀 ☄️ 🛸
 
-Asset counts: 1–2 for singletons (sun, moon), 2–5 for groups (trees, clouds, stars).
+ASSET SIZING — set size to reflect how the story describes each element:
+  xs → tiny, miniature  (e.g. "tiny bunny", "little bee")
+  sm → small, modest    (e.g. "small bush", "a few flowers")
+  md → normal / default (most items when no size is mentioned)
+  lg → big, tall        (e.g. "tall oak tree", "large boulder")
+  xl → enormous, massive (e.g. "massive ancient tree", "towering castle", "giant")
+
+DENSE GROUPS — for scenes with many of the same thing, use count 5–10 with consistent size:
+  Forest   → { emoji: "🌲", count: 8, size: "md" }
+  Starfield → { emoji: "⭐", count: 10, size: "sm" }
+  Flower field → { emoji: "🌸", count: 7, size: "sm" }
 
 CURRENT STORY STATUS: Turn ${storyTurnCount} of 20.
 ${getPhaseInstructions(storyTurnCount)}`
