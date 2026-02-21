@@ -7,6 +7,12 @@ import { ChatGroq } from '@langchain/groq'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
 import { z } from 'zod'
+import {
+  putWorkingMemory,
+  getWorkingMemory,
+  getUserCharacters,
+  promoteToLongTermMemory,
+} from './memory.js'
 
 dotenv.config()
 
@@ -85,8 +91,11 @@ function getPhaseInstructions(turn: number): string {
 }
 
 // ── System prompt ─────────────────────────────────────────────────────────────
-function buildSystemPrompt(storyTurnCount: number): string {
-  return `You are a friendly, imaginative storytelling assistant for children ages 6–12.
+function buildSystemPrompt(storyTurnCount: number, characterContext?: string): string {
+  const characterSection = characterContext
+    ? `\nRETURNING CHARACTER CONTEXT:\n${characterContext}\n`
+    : ''
+  return `You are a friendly, imaginative storytelling assistant for children ages 6–12.${characterSection}
 
 STORY RULES:
 1. LANGUAGE: No bad words, crude language, or inappropriate content.
@@ -236,9 +245,12 @@ app.get('/api/hello', async (_req, res) => {
 
 // ── POST /api/chat ────────────────────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
-  const { messages, storyTurnCount } = req.body as {
+  const { messages, storyTurnCount, sessionId, userId, characterContext } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
     storyTurnCount: number
+    sessionId?: string
+    userId?: string
+    characterContext?: string
   }
 
   try {
@@ -249,11 +261,16 @@ app.post('/api/chat', async (req, res) => {
       .map(m => m.role === 'user' ? new HumanMessage(m.content) : new AIMessage(m.content))
 
     const response: StoryResponseType = await model.invoke([
-      new SystemMessage(buildSystemPrompt(storyTurnCount)),
+      new SystemMessage(buildSystemPrompt(storyTurnCount, characterContext)),
       ...langchainMessages,
     ])
 
     res.json(response)
+
+    // Fire-and-forget: persist working memory after each turn
+    if (sessionId && userId) {
+      putWorkingMemory(sessionId, userId, messages, storyTurnCount, characterContext).catch(() => {})
+    }
   } catch (err) {
     const recovered = recoverFromFailedGeneration(err, StoryResponse)
     if (recovered) { res.json(recovered); return }
@@ -264,8 +281,12 @@ app.post('/api/chat', async (req, res) => {
 
 // ── POST /api/end-story — clean up and save the story to output/ ──────────────
 app.post('/api/end-story', async (req, res) => {
-  const { messages } = req.body as {
+  const { messages, userId, sessionId, characterName, characterContext } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
+    userId?: string
+    sessionId?: string
+    characterName?: string
+    characterContext?: string
   }
 
   const conversationLog = messages
