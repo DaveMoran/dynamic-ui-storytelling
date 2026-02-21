@@ -11,10 +11,21 @@ interface GradientStop {
   zone: ZoneType
 }
 
+type SizeType = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+
+const SIZE_MAP: Record<SizeType, number> = {
+  xs: 1.4,
+  sm: 2.1,
+  md: 3.0,
+  lg: 4.4,
+  xl: 6.2,
+}
+
 interface AssetSpec {
   emoji: string
   zone: ZoneType
   count: number
+  size: SizeType
 }
 
 interface PlacedAsset {
@@ -77,13 +88,16 @@ function generatePlacedAssets(specs: AssetSpec[], stops: GradientStop[]): Placed
 
     const isGround = spec.zone === 'ground'
     const zoneHeight = range.max - range.min
+    const size = SIZE_MAP[spec.size] ?? SIZE_MAP.md
+
+    // Allow tighter packing for large groups — min spacing scales down with count
+    const minSpacing = spec.count <= 3 ? 13 : spec.count <= 6 ? 9 : 6
 
     for (let i = 0; i < spec.count; i++) {
-      // Pick x with spacing from existing placements
       let x = 5 + Math.random() * 84
-      for (let attempt = 0; attempt < 8; attempt++) {
+      for (let attempt = 0; attempt < 10; attempt++) {
         const candidate = 5 + Math.random() * 84
-        if (!usedX.some(u => Math.abs(u - candidate) < 11)) {
+        if (!usedX.some(u => Math.abs(u - candidate) < minSpacing)) {
           x = candidate
           break
         }
@@ -92,15 +106,12 @@ function generatePlacedAssets(specs: AssetSpec[], stops: GradientStop[]): Placed
 
       let y: number
       if (isGround) {
-        // Anchor near the horizon (top edge of ground zone) so trees sit on the ground line
+        // Anchor near the horizon so assets sit on the ground line
         y = range.min + zoneHeight * (Math.random() * 0.28)
       } else {
         // Distribute freely throughout the zone
         y = range.min + zoneHeight * (0.08 + Math.random() * 0.72)
       }
-
-      const isSingleton = ['☀️', '🌙', '🌟', '🌈', '🪐'].includes(spec.emoji)
-      const size = isGround ? 3.6 : isSingleton ? 3.4 : 2.4
 
       placed.push({
         id: `${spec.emoji}-${i}-${Math.random().toString(36).slice(2)}`,
