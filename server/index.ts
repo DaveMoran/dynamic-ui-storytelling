@@ -186,6 +186,8 @@ app.post('/api/chat', async (req, res) => {
 
     res.json(response)
   } catch (err) {
+    const recovered = recoverFromFailedGeneration(err, StoryResponse)
+    if (recovered) { res.json(recovered); return }
     console.error('Groq error:', err)
     res.status(500).json({ error: 'Failed to generate response' })
   }
