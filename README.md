@@ -1,11 +1,31 @@
-# React + TypeScript + Vite
+# Dynamic UI Storytelling
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Children ages 6–12 have vivid imaginations but limited tools that make storytelling feel alive. This app bridges the gap between typed narrative and visual experience: as a child types a story fragment, the interface transforms in real time — backgrounds shift, scene elements appear, and an AI co-author keeps the story moving forward. The result is an interactive, child-safe storytelling canvas that feels magical to use.
 
-Currently, two official plugins are available:
+## Tech Stack
+- React
+- Vite
+- LangChain
+- Groq
+- Typescript
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Versions
+
+### V0.2
+- Optimize AI agent to focus on story
+- Add limitation for story telling, including number of prompts and focus
+
+### v0.1
+- Add langchain to project
+- Begin with free model (groq)
+- Populate hello world screen with response from AI agent via Langchain
+
+### v0.0
+- Initial scaffolding from vite react
+
+----
+
+Deprecated
 
 ## React Compiler
 
@@ -71,13 +91,3 @@ export default defineConfig([
   },
 ])
 ```
-
-## Versions
-
-### v0.1
-- Add langchain to project
-- Begin with free model (groq)
-- Populate hello world screen with response from AI agent via Langchain
-
-### v0.0
-- Initial scaffolding from vite react
