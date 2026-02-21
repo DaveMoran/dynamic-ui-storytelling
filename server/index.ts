@@ -9,9 +9,9 @@ import {
   putWorkingMemory,
   getWorkingMemory,
   getUserCharacters,
-  getStoryCounts,
-  promoteToLongTermMemory,
+  saveCharacter,
   saveStory,
+  getStoriesForUser,
 } from './memory.js'
 
 dotenv.config()
@@ -350,10 +350,10 @@ app.post('/api/end-story', async (req, res) => {
 
     res.json({ title, story: cleanStory, characterDescription: aiDescription })
 
-    // Fire-and-forget: save story entry + update character profile in Redis
+    // Fire-and-forget: save character entry and story entry separately
     if (userId && sessionId && characterName) {
+      saveCharacter(userId, sessionId, characterName, aiDescription).catch(() => {})
       saveStory(userId, sessionId, characterName, title, cleanStory).catch(() => {})
-      promoteToLongTermMemory(userId, sessionId, characterName, aiDescription, cleanStory).catch(() => {})
     }
   } catch (err) {
     console.error('End story error:', err)
@@ -365,19 +365,16 @@ app.post('/api/end-story', async (req, res) => {
 app.get('/api/user/:userId/characters', async (req, res) => {
   res.set('Cache-Control', 'no-store')
   const { userId } = req.params
-  const [characters, storyCounts] = await Promise.all([
-    getUserCharacters(userId),
-    getStoryCounts(userId),
-  ])
-  res.json(characters.map(c => ({ ...c, storyCount: storyCounts[c.name] ?? 0 })))
+  const characters = await getUserCharacters(userId)
+  res.json(characters)
 })
 
-// ── GET /api/user/:userId/stories ─────────────────────────────────────────────
+// ── GET /api/user/:userId/stories ────────────────────────────────────────────
 app.get('/api/user/:userId/stories', async (req, res) => {
   res.set('Cache-Control', 'no-store')
   const { userId } = req.params
-  const counts = await getStoryCounts(userId)
-  res.json(counts)
+  const stories = await getStoriesForUser(userId)
+  res.json(stories)
 })
 
 // ── GET /api/session/:sessionId/resume ────────────────────────────────────────
