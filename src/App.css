@@ -19,6 +19,14 @@
   margin: 0;
 }
 
+.turn-counter {
+  display: block;
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-top: 0.25rem;
+  letter-spacing: 0.04em;
+}
+
 /* ── Message feed ── */
 .message-feed {
   flex: 1;
