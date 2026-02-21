@@ -11,6 +11,10 @@ Children ages 6–12 have vivid imaginations but limited tools that make storyte
 
 ## Versions
 
+### V0.3
+- Change background of story based on the prompts from the user
+- Have chat "float" above the story so all elements are visible
+
 ### V0.2
 - Optimize AI agent to focus on story
 - Add limitation for story telling, including number of prompts and focus

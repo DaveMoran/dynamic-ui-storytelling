@@ -11,14 +11,36 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-// ── Structured output schema ──────────────────────────────────────────────────
+// ── Structured output schemas ─────────────────────────────────────────────────
+
+const HelloResponse = z.object({
+  message: z.string().describe('A single vivid opening sentence to start the story'),
+  gradientStart: z.string().describe('CSS hex color for the top of the background gradient'),
+  gradientEnd: z.string().describe('CSS hex color for the bottom of the background gradient'),
+})
+
 const StoryResponse = z.object({
   message: z.string().describe('The story continuation or off-topic redirect message'),
   offTopic: z
     .boolean()
     .describe('true ONLY if the user input was unrelated to the story and was redirected'),
+  gradientStart: z
+    .string()
+    .describe(
+      'CSS hex color for the top of the background gradient — match the story scene and mood. ' +
+        'Examples: sunny=#87CEEB, night=#0D1B2A, forest=#1B5E20, sunset=#FF6B6B, ocean=#0077B6, ' +
+        'magical=#6C63FF, snow=#E0F7FA, desert=#F4A261, cave=#37474F'
+    ),
+  gradientEnd: z
+    .string()
+    .describe(
+      'CSS hex color for the bottom of the background gradient — complementary to gradientStart. ' +
+        'Examples: sunny=#90EE90, night=#1B263B, forest=#2E7D32, sunset=#FFB347, ocean=#00B4D8, ' +
+        'magical=#F7B733, snow=#B2EBF2, desert=#E9C46A, cave=#546E7A'
+    ),
 })
 
+type HelloResponseType = z.infer<typeof HelloResponse>
 type StoryResponseType = z.infer<typeof StoryResponse>
 
 // ── Story phase instructions by turn ─────────────────────────────────────────
@@ -46,6 +68,7 @@ RULES — follow these strictly at all times:
 3. ENDINGS: Stories must always end happily or hopefully. Never write sad, scary, or bad endings.
 4. OFF-TOPIC: If the user writes something completely unrelated to the story (e.g. random questions, requests for inappropriate content, real-world topics), set offTopic to true and respond with a friendly redirect — e.g. "Oops! Let's get back to our story! [one sentence recap of where we left off]." Do NOT count this as a story turn.
 5. STORY INPUT: Even unusual, silly, or unexpected story ideas should be embraced and set offTopic to false.
+6. BACKGROUND COLORS: Choose gradientStart and gradientEnd hex colors that visually match the current scene — sky, time of day, location, and mood. Keep colors bright and child-friendly.
 
 CURRENT STORY STATUS: Turn ${storyTurnCount} of 20.
 ${getPhaseInstructions(storyTurnCount)}`
@@ -61,14 +84,18 @@ function createModel() {
 // ── GET /api/hello — opening story line on page load ─────────────────────────
 app.get('/api/hello', async (_req, res) => {
   try {
-    const response = await createModel().invoke([
-      new SystemMessage(buildSystemPrompt(0)),
-      new HumanMessage(
-        'Start a magical, whimsical story with a single vivid opening sentence. Make it fun and imaginative for kids!'
+    const model = createModel().withStructuredOutput(HelloResponse)
+
+    const response: HelloResponseType = await model.invoke([
+      new SystemMessage(
+        'You are a friendly storytelling assistant for children ages 6–12. ' +
+          'Start a magical, whimsical story with a single vivid opening sentence. ' +
+          'Also choose two CSS hex gradient colors that match the opening scene mood.'
       ),
+      new HumanMessage('Begin the story!'),
     ])
 
-    res.json({ message: response.content })
+    res.json(response)
   } catch (err) {
     console.error('Groq error:', err)
     res.status(500).json({ error: 'Failed to generate story' })
