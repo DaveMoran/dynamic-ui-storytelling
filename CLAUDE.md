@@ -253,7 +253,7 @@ dynamic-ui-storytelling/
 │   └── vite.config.js               # Proxy /api → localhost:3001
 │
 ├── server/                          # Express proxy
-│   ├── index.js                     # Express app entry
+│   ├── index.ts                     # Express app entry
 │   ├── routes/
 │   │   └── story.js                 # POST /api/story handler
 │   ├── services/
