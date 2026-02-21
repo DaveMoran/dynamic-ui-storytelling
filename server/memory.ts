@@ -31,7 +31,8 @@ function toApiMessages(messages: AppMessage[]): ApiMessage[] {
   }))
 }
 
-// Store/update working memory after each chat turn (fire-and-forget)
+// ── Working memory (session-scoped) ───────────────────────────────────────────
+
 export async function putWorkingMemory(
   sessionId: string,
   userId: string,
@@ -73,11 +74,10 @@ export async function putWorkingMemory(
       }),
     })
   } catch {
-    // Degrade gracefully — memory server may be unavailable
+    // Degrade gracefully
   }
 }
 
-// Retrieve working memory to resume a session
 export async function getWorkingMemory(sessionId: string): Promise<{
   messages: AppMessage[]
   storyTurnCount: number
@@ -116,17 +116,47 @@ export async function getWorkingMemory(sessionId: string): Promise<{
   }
 }
 
-// Search long-term memory for a user's characters
+// ── Long-term memory: characters ──────────────────────────────────────────────
+
+// Save one character entry per story completion.
+// Uses a unique session-based ID so there is never an overwrite/upsert risk.
+// storyCount is derived by counting how many entries exist for a given name.
+export async function saveCharacter(
+  userId: string,
+  sessionId: string,
+  characterName: string,
+  characterDescription: string
+): Promise<void> {
+  try {
+    await fetch(`${MEMORY_SERVER}/v1/long-term-memory/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        memories: [{
+          id: `char-${userId}-${sessionId.slice(0, 8)}`,
+          text: `Character: ${characterName}. Description: ${characterDescription}.`,
+          memory_type: 'semantic',
+          topics: ['character'],
+          user_id: userId,
+          session_id: sessionId,
+        }],
+        deduplicate: false,
+      }),
+    })
+  } catch {}
+}
+
+// Retrieve all character entries for a user, deduplicated by name.
+// storyCount = number of entries found for that name.
 export async function getUserCharacters(userId: string): Promise<CharacterSummary[]> {
   try {
-    // No `text` field → filter-only listing, no semantic/embedding search needed
     const res = await fetch(`${MEMORY_SERVER}/v1/long-term-memory/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user_id: { eq: userId },
         topics: { any: ['character'] },
-        limit: 20,
+        limit: 100,
       }),
     })
     if (!res.ok) return []
@@ -139,65 +169,51 @@ export async function getUserCharacters(userId: string): Promise<CharacterSummar
       }>
     }
 
-    const characters: CharacterSummary[] = []
-    for (const mem of (data.memories ?? [])) {
-      // Expected format: "Character: {name}. Description: {description}. Story summary: ..."
-      const nameMatch = mem.text.match(/Character:\s*([^.]+)\./)
-      const descMatch = mem.text.match(/Description:\s*(.*?)\.\s*Story summary:/s)
-        ?? mem.text.match(/Description:\s*(.+?)(?:\.|$)/)
+    // Group by character name, keep most recent entry, count total per name
+    const byName = new Map<string, {
+      description: string
+      sessionId: string
+      lastPlayed: string
+      count: number
+    }>()
 
-      if (nameMatch) {
-        characters.push({
-          name: nameMatch[1].trim(),
-          description: descMatch ? descMatch[1].trim() : '',
-          sessionId: mem.session_id ?? '',
-          lastPlayed: mem.created_at ?? new Date().toISOString(),
-          storyCount: 0, // populated by caller via getStoryCounts()
-        })
+    for (const mem of (data.memories ?? [])) {
+      const nameMatch = mem.text.match(/Character:\s*([^.]+)\./)
+      if (!nameMatch) continue
+
+      const name = nameMatch[1].trim()
+      const descMatch = mem.text.match(/Description:\s*(.*?)\.?\s*$/)
+      const description = descMatch ? descMatch[1].trim() : ''
+      const createdAt = mem.created_at ?? new Date().toISOString()
+
+      const existing = byName.get(name)
+      if (!existing) {
+        byName.set(name, { description, sessionId: mem.session_id ?? '', lastPlayed: createdAt, count: 1 })
+      } else {
+        existing.count += 1
+        if (createdAt > existing.lastPlayed) {
+          existing.description = description
+          existing.sessionId = mem.session_id ?? existing.sessionId
+          existing.lastPlayed = createdAt
+        }
       }
     }
 
-    return characters
+    return Array.from(byName.entries()).map(([name, info]) => ({
+      name,
+      description: info.description,
+      sessionId: info.sessionId,
+      lastPlayed: info.lastPlayed,
+      storyCount: info.count,
+    }))
   } catch {
     return []
   }
 }
 
-// Promote completed story's character to long-term memory
-export async function promoteToLongTermMemory(
-  userId: string,
-  sessionId: string,
-  characterName: string,
-  characterDescription: string,
-  storySummary: string
-): Promise<void> {
-  try {
-    await fetch(`${MEMORY_SERVER}/v1/long-term-memory/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        memories: [
-          {
-            // Stable ID: same character name always maps to the same profile entry,
-            // so each story completion updates (overwrites) the character's description
-            // rather than creating duplicate entries. Story history is tracked separately.
-            id: `char-${userId}-${characterName.toLowerCase().replace(/\s+/g, '-')}`,
-            text: `Character: ${characterName}. Description: ${characterDescription}. Story summary: ${storySummary.slice(0, 300)}`,
-            memory_type: 'semantic',
-            topics: ['character', 'completed-story'],
-            user_id: userId,
-            session_id: sessionId,
-          },
-        ],
-        deduplicate: false,
-      }),
-    })
-  } catch {
-    // Degrade gracefully
-  }
-}
+// ── Long-term memory: stories ─────────────────────────────────────────────────
 
-// Save a completed story to long-term memory
+// Save one story entry per story completion, completely separate from character entries.
 export async function saveStory(
   userId: string,
   sessionId: string,
@@ -212,9 +228,9 @@ export async function saveStory(
       body: JSON.stringify({
         memories: [{
           id: `story-${userId}-${sessionId.slice(0, 8)}`,
-          text: `Title: ${title}. Character: ${characterName}. Summary: ${content.slice(0, 500)}`,
+          text: `Title: ${title}. Character: ${characterName}. Summary: ${content.slice(0, 400)}`,
           memory_type: 'semantic',
-          topics: ['story', 'completed-story'],
+          topics: ['story'],
           user_id: userId,
           session_id: sessionId,
         }],
@@ -224,8 +240,13 @@ export async function saveStory(
   } catch {}
 }
 
-// Get story counts keyed by character name for a given user
-export async function getStoryCounts(userId: string): Promise<Record<string, number>> {
+// Retrieve all story entries for a user
+export async function getStoriesForUser(userId: string): Promise<Array<{
+  title: string
+  characterName: string
+  sessionId: string
+  savedAt: string
+}>> {
   try {
     const res = await fetch(`${MEMORY_SERVER}/v1/long-term-memory/search`, {
       method: 'POST',
@@ -236,25 +257,34 @@ export async function getStoryCounts(userId: string): Promise<Record<string, num
         limit: 100,
       }),
     })
-    if (!res.ok) return {}
+    if (!res.ok) return []
 
     const data = await res.json() as {
-      memories?: Array<{ text: string }>
+      memories?: Array<{
+        text: string
+        session_id?: string
+        created_at?: string
+      }>
     }
 
-    const counts: Record<string, number> = {}
+    const stories = []
     for (const mem of (data.memories ?? [])) {
-      const match = mem.text.match(/Character:\s*([^.]+)\./)
-      if (match) {
-        const name = match[1].trim()
-        counts[name] = (counts[name] ?? 0) + 1
-      }
+      const titleMatch = mem.text.match(/Title:\s*([^.]+)\./)
+      const nameMatch = mem.text.match(/Character:\s*([^.]+)\./)
+      stories.push({
+        title: titleMatch ? titleMatch[1].trim() : 'Untitled',
+        characterName: nameMatch ? nameMatch[1].trim() : '',
+        sessionId: mem.session_id ?? '',
+        savedAt: mem.created_at ?? new Date().toISOString(),
+      })
     }
-    return counts
+    return stories
   } catch {
-    return {}
+    return []
   }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getPhaseLabel(turn: number): string {
   if (turn <= 1) return 'LAUNCH'
