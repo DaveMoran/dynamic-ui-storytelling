@@ -223,8 +223,17 @@ function App() {
     setBgBase(buildGradient(DEFAULT_STOPS))
     setBgIncoming(null)
 
+    // Extract the character name from the context so the greeting can reference them
+    const charName = ctxOverride
+      ? ctxOverride.replace(/:.*$/, '').trim() // "Rosie: desc" → "Rosie"
+      : undefined
+
     setLoading(true)
-    fetch('/api/hello')
+    fetch('/api/hello', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterName: charName }),
+    })
       .then(r => r.json())
       .then((data: HelloResponse) => {
         setMessages([{ role: 'assistant', content: data.message }])
