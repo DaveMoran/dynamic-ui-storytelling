@@ -118,11 +118,11 @@ export async function getWorkingMemory(sessionId: string): Promise<{
 // Search long-term memory for a user's characters
 export async function getUserCharacters(userId: string): Promise<CharacterSummary[]> {
   try {
+    // No `text` field → filter-only listing, no semantic/embedding search needed
     const res = await fetch(`${MEMORY_SERVER}/v1/long-term-memory/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text: 'character story',
         user_id: { eq: userId },
         topics: { any: ['character'] },
         limit: 20,
@@ -185,7 +185,7 @@ export async function promoteToLongTermMemory(
             session_id: sessionId,
           },
         ],
-        deduplicate: true,
+        deduplicate: false,
       }),
     })
   } catch {
