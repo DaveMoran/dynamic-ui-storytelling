@@ -73,5 +73,11 @@ export default defineConfig([
 ```
 
 ## Versions
+
+### v0.1
+- Add langchain to project
+- Begin with free model (groq)
+- Populate hello world screen with response from AI agent via Langchain
+
 ### v0.0
 - Initial scaffolding from vite react
