@@ -11,6 +11,9 @@ Children ages 6–12 have vivid imaginations but limited tools that make storyte
 
 ## Versions
 
+### v1.2
+- Add redis support for saving characters
+
 ### v1.1
 - Add new ui elements for story end
 - Save story to markdown files

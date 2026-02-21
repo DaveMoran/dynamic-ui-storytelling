@@ -56,7 +56,14 @@ interface ChatResponse extends SceneData {
   suggestEnding: boolean
 }
 
-type UIMode = 'chatting' | 'suggest-ending' | 'ended'
+interface CharacterSummary {
+  name: string
+  description: string
+  sessionId: string
+  lastPlayed: string
+}
+
+type UIMode = 'welcome' | 'character-select' | 'chatting' | 'suggest-ending' | 'ended'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -129,6 +136,18 @@ function generatePlacedAssets(specs: AssetSpec[], stops: GradientStop[]): Placed
   return placed
 }
 
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch {
+    return iso
+  }
+}
+
 // ── Default scene (shown while /api/hello loads) ──────────────────────────────
 
 const DEFAULT_STOPS: GradientStop[] = [
@@ -155,8 +174,15 @@ function App() {
   const [placedAssets, setPlacedAssets] = useState<PlacedAsset[]>([])
 
   // Story ending flow
-  const [uiMode, setUiMode] = useState<UIMode>('chatting')
+  const [uiMode, setUiMode] = useState<UIMode>('welcome')
   const [savedFilename, setSavedFilename] = useState<string | null>(null)
+
+  // Memory / identity state
+  const [userId, setUserId] = useState('')
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
+  const [characterContext, setCharacterContext] = useState<string | undefined>()
+  const [availableCharacters, setAvailableCharacters] = useState<CharacterSummary[]>([])
+  const [welcomeInput, setWelcomeInput] = useState('')
 
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -179,7 +205,7 @@ function App() {
     setPlacedAssets(generatePlacedAssets(assets, stops))
   }
 
-  const startNewStory = () => {
+  const startNewStory = (ctxOverride?: string) => {
     setMessages([])
     setStoryTurnCount(0)
     setInput('')
@@ -199,12 +225,90 @@ function App() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
+
+    if (ctxOverride !== undefined) {
+      setCharacterContext(ctxOverride)
+    }
   }
 
-  // Start on mount
+  // Fetch characters with cache bust, then route to character-select or start fresh
+  const fetchAndShowCharacters = (uid: string) => {
+    fetch(`/api/user/${uid}/characters`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then((chars: CharacterSummary[]) => {
+        if (chars.length > 0) {
+          setAvailableCharacters(chars)
+          setUiMode('character-select')
+        } else {
+          startNewStory()
+        }
+      })
+      .catch(() => startNewStory())
+  }
+
+  // On mount: check localStorage for existing userId
   useEffect(() => {
-    startNewStory()
+    const storedUserId = localStorage.getItem('storyUserId')
+    if (storedUserId) {
+      setUserId(storedUserId)
+      fetchAndShowCharacters(storedUserId)
+    }
+    // else: stay on welcome screen (default uiMode)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleWelcomeSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const name = welcomeInput.trim()
+    if (!name) return
+
+    const newUserId = `${slugify(name)}-${Math.random().toString(36).slice(2, 7)}`
+    setUserId(newUserId)
+    localStorage.setItem('storyUserId', newUserId)
+    fetchAndShowCharacters(newUserId)
+  }
+
+  const handleContinueMidStory = async (character: CharacterSummary) => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/session/${character.sessionId}/resume`)
+      const data = await res.json() as {
+        messages: Message[]
+        storyTurnCount: number
+        characterContext?: string
+      } | null
+
+      if (data) {
+        setSessionId(character.sessionId)
+        setMessages(data.messages)
+        setStoryTurnCount(data.storyTurnCount)
+        setCharacterContext(data.characterContext)
+        setUiMode('chatting')
+      } else {
+        // Session expired or not found — start fresh with this character
+        const ctx = `${character.name}: ${character.description}`
+        setCharacterContext(ctx)
+        setSessionId(crypto.randomUUID())
+        startNewStory(ctx)
+      }
+    } catch {
+      startNewStory()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleNewAdventureWith = (character: CharacterSummary) => {
+    const ctx = `${character.name}: ${character.description}`
+    setCharacterContext(ctx)
+    setSessionId(crypto.randomUUID())
+    startNewStory(ctx)
+  }
+
+  const handleNewStory = () => {
+    setCharacterContext(undefined)
+    setSessionId(crypto.randomUUID())
+    startNewStory()
+  }
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
@@ -221,7 +325,13 @@ function App() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: updatedMessages, storyTurnCount: proposedTurnCount }),
+        body: JSON.stringify({
+          messages: updatedMessages,
+          storyTurnCount: proposedTurnCount,
+          sessionId,
+          userId,
+          characterContext,
+        }),
       })
       const data = await res.json() as ChatResponse
 
@@ -245,17 +355,61 @@ function App() {
     }
   }
 
+  // The first user message IS the character's name (verbatim).
+  // For returning characters, fall back to the name embedded in characterContext.
+  const deriveCharacterName = (): string | undefined => {
+    const firstUserMsg = messages.find(m => m.role === 'user')?.content?.trim()
+    if (firstUserMsg) return firstUserMsg
+    if (characterContext) {
+      const match = characterContext.match(/^([^:]+):/)
+      if (match) return match[1].trim()
+    }
+    return undefined
+  }
+
+  // Description is whatever follows "Name: " in characterContext, or empty for new chars.
+  const deriveCharacterDescription = (): string => {
+    if (characterContext) {
+      return characterContext.replace(/^[^:]+:\s*/, '').trim()
+    }
+    return ''
+  }
+
+  const handleNewAdventureWithCurrent = () => {
+    const name = deriveCharacterName() ?? ''
+    const description = deriveCharacterDescription()
+    const ctx = description ? `${name}: ${description}` : name || undefined
+    setCharacterContext(ctx)
+    setSessionId(crypto.randomUUID())
+    startNewStory(ctx)
+  }
+
   const endStory = async () => {
     setLoading(true)
     try {
+      const characterName = deriveCharacterName()
+      const characterDescription = deriveCharacterDescription() || 'a brave adventurer'
       const res = await fetch('/api/end-story', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({
+          messages,
+          userId,
+          sessionId,
+          characterName,
+          characterDescription,
+        }),
       })
       const data = await res.json() as { filename: string; story: string }
       setSavedFilename(data.filename)
       setUiMode('ended')
+      // Refresh character list in the background so it's ready if they return to character-select
+      if (userId) {
+        fetch(`/api/user/${userId}/characters`, { cache: 'no-store' })
+          .then(r => r.json())
+          .then((chars: CharacterSummary[]) => { if (chars.length > 0) setAvailableCharacters(chars) })
+          .catch(() => {})
+      }
     } catch {
       setMessages(prev => [
         ...prev,
@@ -312,25 +466,89 @@ function App() {
           )}
         </header>
 
-        <div className="message-feed">
-          {messages.map((msg, i) => (
-            <div key={i} className={`message ${msg.role}`}>
-              <span className="message-label">
-                {msg.role === 'user' ? 'You' : 'Story AI'}
-              </span>
-              <p className="message-bubble">{msg.content}</p>
-            </div>
-          ))}
+        {/* ── Welcome screen ── */}
+        {uiMode === 'welcome' && (
+          <div className="welcome-screen">
+            <p className="welcome-prompt">What's your name, storyteller?</p>
+            <form onSubmit={handleWelcomeSubmit} className="welcome-form">
+              <input
+                type="text"
+                value={welcomeInput}
+                onChange={e => setWelcomeInput(e.target.value)}
+                placeholder="Enter your name..."
+                autoFocus
+                className="welcome-input"
+              />
+              <button
+                type="submit"
+                className="btn-welcome"
+                disabled={!welcomeInput.trim()}
+              >
+                Let's Go!
+              </button>
+            </form>
+          </div>
+        )}
 
-          {loading && (
-            <div className="message assistant">
-              <span className="message-label">Story AI</span>
-              <p className="message-bubble typing">thinking...</p>
+        {/* ── Character select screen ── */}
+        {uiMode === 'character-select' && (
+          <div className="character-select">
+            <p className="character-select-heading">Welcome back! Pick an adventure:</p>
+            <div className="character-list">
+              {availableCharacters.map(char => (
+                <div key={char.sessionId} className="character-card">
+                  <div className="character-card-info">
+                    <span className="character-card-name">{char.name}</span>
+                    <span className="character-card-desc">{char.description}</span>
+                    <span className="character-card-date">Last played: {formatDate(char.lastPlayed)}</span>
+                  </div>
+                  <div className="character-card-actions">
+                    <button
+                      className="btn-continue-story"
+                      onClick={() => handleContinueMidStory(char)}
+                      disabled={loading}
+                    >
+                      Continue
+                    </button>
+                    <button
+                      className="btn-new-adventure"
+                      onClick={() => handleNewAdventureWith(char)}
+                      disabled={loading}
+                    >
+                      New adventure
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
+            <button className="btn-brand-new" onClick={handleNewStory} disabled={loading}>
+              Start a brand new story
+            </button>
+          </div>
+        )}
 
-          <div ref={bottomRef} />
-        </div>
+        {/* ── Message feed (chatting / suggest-ending / ended) ── */}
+        {(uiMode === 'chatting' || uiMode === 'suggest-ending' || uiMode === 'ended') && (
+          <div className="message-feed">
+            {messages.map((msg, i) => (
+              <div key={i} className={`message ${msg.role}`}>
+                <span className="message-label">
+                  {msg.role === 'user' ? 'You' : 'Story AI'}
+                </span>
+                <p className="message-bubble">{msg.content}</p>
+              </div>
+            ))}
+
+            {loading && (
+              <div className="message assistant">
+                <span className="message-label">Story AI</span>
+                <p className="message-bubble typing">thinking...</p>
+              </div>
+            )}
+
+            <div ref={bottomRef} />
+          </div>
+        )}
 
         {uiMode === 'chatting' && (
           <div className="input-bar">
@@ -376,9 +594,19 @@ function App() {
             {savedFilename && (
               <p className="ending-saved">📖 Saved as <strong>{savedFilename}</strong></p>
             )}
-            <button className="btn-new-story" onClick={startNewStory}>
-              Start a New Story
-            </button>
+            <p className="ending-prompt">What's next?</p>
+            <div className="ending-buttons">
+              <button className="btn-end" onClick={handleNewAdventureWithCurrent} disabled={loading}>
+                New adventure with {deriveCharacterName() ?? 'this character'}
+              </button>
+              <button
+                className="btn-continue"
+                onClick={() => userId ? fetchAndShowCharacters(userId) : handleNewStory()}
+                disabled={loading}
+              >
+                New character
+              </button>
+            </div>
           </div>
         )}
       </div>

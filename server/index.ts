@@ -7,6 +7,12 @@ import { ChatGroq } from '@langchain/groq'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
 import { z } from 'zod'
+import {
+  putWorkingMemory,
+  getWorkingMemory,
+  getUserCharacters,
+  promoteToLongTermMemory,
+} from './memory.js'
 
 dotenv.config()
 
@@ -69,8 +75,8 @@ type StoryResponseType = z.infer<typeof StoryResponse>
 // ── Story phase instructions ──────────────────────────────────────────────────
 function getPhaseInstructions(turn: number): string {
   if (turn === 1) {
-    return 'STORY PHASE — LAUNCH: The user has just described their main character. Use their description to begin the story. ' +
-      'Introduce the character by name with a vivid opening sentence, place them in an exciting setting, and hint at the adventure ahead.'
+    return 'STORY PHASE — LAUNCH: The user\'s entire message IS the character\'s name — treat it verbatim as the name, nothing else. ' +
+      'Open the story by introducing this character with a vivid, exciting first sentence, place them in a setting, and hint at the adventure ahead.'
   } else if (turn <= 5) {
     return 'STORY PHASE — BEGINNING: Introduce the main character(s) and setting. Build a sense of wonder and excitement.'
   } else if (turn <= 10) {
@@ -85,8 +91,11 @@ function getPhaseInstructions(turn: number): string {
 }
 
 // ── System prompt ─────────────────────────────────────────────────────────────
-function buildSystemPrompt(storyTurnCount: number): string {
-  return `You are a friendly, imaginative storytelling assistant for children ages 6–12.
+function buildSystemPrompt(storyTurnCount: number, characterContext?: string): string {
+  const characterSection = characterContext
+    ? `\nRETURNING CHARACTER CONTEXT:\n${characterContext}\n`
+    : ''
+  return `You are a friendly, imaginative storytelling assistant for children ages 6–12.${characterSection}
 
 STORY RULES:
 1. LANGUAGE: No bad words, crude language, or inappropriate content.
@@ -216,9 +225,9 @@ app.get('/api/hello', async (_req, res) => {
     const response: HelloResponseType = await model.invoke([
       new SystemMessage(
         'You are a friendly storytelling assistant for children ages 6–12. ' +
-        'Your job right now is to warmly welcome the child and ask them ONE question to learn about their main character. ' +
-        'Ask for: their character\'s name and one thing that makes them special (e.g. a superpower, a pet, a favourite thing). ' +
-        'Keep it to 1–2 short, enthusiastic sentences — make it feel exciting to answer! ' +
+        'Your job right now is to warmly welcome the child and ask them ONE simple question: ' +
+        'what is the name of their character? ' +
+        'Keep it to 1 short, enthusiastic sentence — make it feel exciting to answer! ' +
         'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
         'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
       ),
@@ -236,9 +245,12 @@ app.get('/api/hello', async (_req, res) => {
 
 // ── POST /api/chat ────────────────────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
-  const { messages, storyTurnCount } = req.body as {
+  const { messages, storyTurnCount, sessionId, userId, characterContext } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
     storyTurnCount: number
+    sessionId?: string
+    userId?: string
+    characterContext?: string
   }
 
   try {
@@ -249,11 +261,16 @@ app.post('/api/chat', async (req, res) => {
       .map(m => m.role === 'user' ? new HumanMessage(m.content) : new AIMessage(m.content))
 
     const response: StoryResponseType = await model.invoke([
-      new SystemMessage(buildSystemPrompt(storyTurnCount)),
+      new SystemMessage(buildSystemPrompt(storyTurnCount, characterContext)),
       ...langchainMessages,
     ])
 
     res.json(response)
+
+    // Fire-and-forget: persist working memory after each turn
+    if (sessionId && userId) {
+      putWorkingMemory(sessionId, userId, messages, storyTurnCount, characterContext).catch(() => {})
+    }
   } catch (err) {
     const recovered = recoverFromFailedGeneration(err, StoryResponse)
     if (recovered) { res.json(recovered); return }
@@ -264,8 +281,12 @@ app.post('/api/chat', async (req, res) => {
 
 // ── POST /api/end-story — clean up and save the story to output/ ──────────────
 app.post('/api/end-story', async (req, res) => {
-  const { messages } = req.body as {
+  const { messages, userId, sessionId, characterName, characterDescription } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
+    userId?: string
+    sessionId?: string
+    characterName?: string
+    characterDescription?: string
   }
 
   const conversationLog = messages
@@ -300,10 +321,36 @@ app.post('/api/end-story', async (req, res) => {
     await fs.promises.writeFile(path.join(outputDir, filename), cleanStory, 'utf-8')
 
     res.json({ filename, story: cleanStory })
+
+    // Fire-and-forget: promote character to long-term memory
+    if (userId && sessionId && characterName) {
+      promoteToLongTermMemory(
+        userId,
+        sessionId,
+        characterName,
+        characterDescription ?? '',
+        cleanStory
+      ).catch(() => {})
+    }
   } catch (err) {
     console.error('End story error:', err)
     res.status(500).json({ error: 'Failed to save story' })
   }
+})
+
+// ── GET /api/user/:userId/characters ─────────────────────────────────────────
+app.get('/api/user/:userId/characters', async (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const { userId } = req.params
+  const characters = await getUserCharacters(userId)
+  res.json(characters)
+})
+
+// ── GET /api/session/:sessionId/resume ────────────────────────────────────────
+app.get('/api/session/:sessionId/resume', async (req, res) => {
+  const { sessionId } = req.params
+  const data = await getWorkingMemory(sessionId)
+  res.json(data ?? null)
 })
 
 const PORT = 3001
