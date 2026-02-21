@@ -75,8 +75,8 @@ type StoryResponseType = z.infer<typeof StoryResponse>
 // ── Story phase instructions ──────────────────────────────────────────────────
 function getPhaseInstructions(turn: number): string {
   if (turn === 1) {
-    return 'STORY PHASE — LAUNCH: The user has just described their main character. Use their description to begin the story. ' +
-      'Introduce the character by name with a vivid opening sentence, place them in an exciting setting, and hint at the adventure ahead.'
+    return 'STORY PHASE — LAUNCH: The user\'s entire message IS the character\'s name — treat it verbatim as the name, nothing else. ' +
+      'Open the story by introducing this character with a vivid, exciting first sentence, place them in a setting, and hint at the adventure ahead.'
   } else if (turn <= 5) {
     return 'STORY PHASE — BEGINNING: Introduce the main character(s) and setting. Build a sense of wonder and excitement.'
   } else if (turn <= 10) {
@@ -225,9 +225,9 @@ app.get('/api/hello', async (_req, res) => {
     const response: HelloResponseType = await model.invoke([
       new SystemMessage(
         'You are a friendly storytelling assistant for children ages 6–12. ' +
-        'Your job right now is to warmly welcome the child and ask them ONE question to learn about their main character. ' +
-        'Ask for: their character\'s name and one thing that makes them special (e.g. a superpower, a pet, a favourite thing). ' +
-        'Keep it to 1–2 short, enthusiastic sentences — make it feel exciting to answer! ' +
+        'Your job right now is to warmly welcome the child and ask them ONE simple question: ' +
+        'what is the name of their character? ' +
+        'Keep it to 1 short, enthusiastic sentence — make it feel exciting to answer! ' +
         'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
         'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
       ),
@@ -281,12 +281,12 @@ app.post('/api/chat', async (req, res) => {
 
 // ── POST /api/end-story — clean up and save the story to output/ ──────────────
 app.post('/api/end-story', async (req, res) => {
-  const { messages, userId, sessionId, characterName, characterContext } = req.body as {
+  const { messages, userId, sessionId, characterName, characterDescription } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
     userId?: string
     sessionId?: string
     characterName?: string
-    characterContext?: string
+    characterDescription?: string
   }
 
   const conversationLog = messages
@@ -328,7 +328,7 @@ app.post('/api/end-story', async (req, res) => {
         userId,
         sessionId,
         characterName,
-        characterContext ?? '',
+        characterDescription ?? '',
         cleanStory
       ).catch(() => {})
     }
