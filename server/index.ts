@@ -321,10 +321,35 @@ app.post('/api/end-story', async (req, res) => {
     await fs.promises.writeFile(path.join(outputDir, filename), cleanStory, 'utf-8')
 
     res.json({ filename, story: cleanStory })
+
+    // Fire-and-forget: promote character to long-term memory
+    if (userId && sessionId && characterName) {
+      promoteToLongTermMemory(
+        userId,
+        sessionId,
+        characterName,
+        characterContext ?? '',
+        cleanStory
+      ).catch(() => {})
+    }
   } catch (err) {
     console.error('End story error:', err)
     res.status(500).json({ error: 'Failed to save story' })
   }
+})
+
+// ── GET /api/user/:userId/characters ─────────────────────────────────────────
+app.get('/api/user/:userId/characters', async (req, res) => {
+  const { userId } = req.params
+  const characters = await getUserCharacters(userId)
+  res.json(characters)
+})
+
+// ── GET /api/session/:sessionId/resume ────────────────────────────────────────
+app.get('/api/session/:sessionId/resume', async (req, res) => {
+  const { sessionId } = req.params
+  const data = await getWorkingMemory(sessionId)
+  res.json(data ?? null)
 })
 
 const PORT = 3001
