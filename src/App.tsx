@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
+import {
+  getLocalCharacters,
+  upsertLocalCharacter,
+  saveLocalStory,
+  getLocalStoryCount,
+} from './localStore'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,6 +67,7 @@ interface CharacterSummary {
   description: string
   sessionId: string
   lastPlayed: string
+  storyCount: number
 }
 
 type UIMode = 'welcome' | 'character-select' | 'chatting' | 'suggest-ending' | 'ended'
@@ -175,7 +182,7 @@ function App() {
 
   // Story ending flow
   const [uiMode, setUiMode] = useState<UIMode>('welcome')
-  const [savedFilename, setSavedFilename] = useState<string | null>(null)
+  const [savedTitle, setSavedTitle] = useState<string | null>(null)
 
   // Memory / identity state
   const [userId, setUserId] = useState('')
@@ -210,7 +217,7 @@ function App() {
     setStoryTurnCount(0)
     setInput('')
     setUiMode('chatting')
-    setSavedFilename(null)
+    setSavedTitle(null)
     setPlacedAssets([])
     if (fadeTimer.current) clearTimeout(fadeTimer.current)
     setBgBase(buildGradient(DEFAULT_STOPS))
@@ -231,19 +238,25 @@ function App() {
     }
   }
 
-  // Fetch characters with cache bust, then route to character-select or start fresh
+  // Fetch characters with cache bust. Falls back to localStorage if Redis is unavailable.
   const fetchAndShowCharacters = (uid: string) => {
+    const showChars = (chars: CharacterSummary[]) => {
+      setAvailableCharacters(chars)
+      setUiMode('character-select')
+    }
+    const fallbackToLocal = () => {
+      const localChars = getLocalCharacters(uid).map(c => ({ ...c }))
+      if (localChars.length > 0) showChars(localChars)
+      else startNewStory()
+    }
+
     fetch(`/api/user/${uid}/characters`, { cache: 'no-store' })
       .then(r => r.json())
       .then((chars: CharacterSummary[]) => {
-        if (chars.length > 0) {
-          setAvailableCharacters(chars)
-          setUiMode('character-select')
-        } else {
-          startNewStory()
-        }
+        if (chars.length > 0) showChars(chars)
+        else fallbackToLocal()
       })
-      .catch(() => startNewStory())
+      .catch(fallbackToLocal)
   }
 
   // On mount: check localStorage for existing userId
@@ -400,10 +413,31 @@ function App() {
           characterDescription,
         }),
       })
-      const data = await res.json() as { filename: string; story: string }
-      setSavedFilename(data.filename)
+      const data = await res.json() as { title: string; story: string; characterDescription: string }
+      setSavedTitle(data.title)
       setUiMode('ended')
-      // Refresh character list in the background so it's ready if they return to character-select
+
+      // Write to localStorage as a fallback for when Redis is unavailable
+      const charName = deriveCharacterName() ?? ''
+      if (userId && charName) {
+        const newStoryCount = getLocalStoryCount(userId, charName) + 1
+        upsertLocalCharacter(userId, {
+          name: charName,
+          description: data.characterDescription,
+          sessionId,
+          lastPlayed: new Date().toISOString(),
+          storyCount: newStoryCount,
+        })
+        saveLocalStory(userId, {
+          id: `story-${sessionId.slice(0, 8)}`,
+          characterName: charName,
+          title: data.title,
+          content: data.story.slice(0, 500),
+          savedAt: new Date().toISOString(),
+        })
+      }
+
+      // Refresh Redis character list in the background
       if (userId) {
         fetch(`/api/user/${userId}/characters`, { cache: 'no-store' })
           .then(r => r.json())
@@ -498,8 +532,15 @@ function App() {
               {availableCharacters.map(char => (
                 <div key={char.sessionId} className="character-card">
                   <div className="character-card-info">
-                    <span className="character-card-name">{char.name}</span>
-                    <span className="character-card-desc">{char.description}</span>
+                    <div className="character-card-header">
+                      <span className="character-card-name">{char.name}</span>
+                      <span className="story-count-badge">
+                        {char.storyCount} {char.storyCount === 1 ? 'story' : 'stories'}
+                      </span>
+                    </div>
+                    {char.description && (
+                      <span className="character-card-desc">{char.description}</span>
+                    )}
                     <span className="character-card-date">Last played: {formatDate(char.lastPlayed)}</span>
                   </div>
                   <div className="character-card-actions">
@@ -591,8 +632,8 @@ function App() {
 
         {uiMode === 'ended' && (
           <div className="ending-choice">
-            {savedFilename && (
-              <p className="ending-saved">📖 Saved as <strong>{savedFilename}</strong></p>
+            {savedTitle && (
+              <p className="ending-saved">📖 <strong>"{savedTitle}"</strong> has been saved!</p>
             )}
             <p className="ending-prompt">What's next?</p>
             <div className="ending-buttons">
