@@ -209,6 +209,7 @@ app.get('/api/hello', async (_req, res) => {
         'For the scene, return a warm, neutral welcoming scene (a bright sunny meadow) using the hard-line gradient technique to separate sky and ground zones. ' +
         'Include a few friendly nature emojis (flowers, clouds, sun) — nothing story-specific yet since the story has not started.'
       ),
+      new HumanMessage('Start the session.'),
     ])
 
     res.json(response)
