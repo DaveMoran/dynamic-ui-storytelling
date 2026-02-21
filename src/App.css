@@ -217,3 +217,83 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ── Ending choice / new story bar ── */
+.ending-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1rem;
+  border-top: 1px solid #ebebeb;
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.ending-prompt {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #555;
+  text-align: center;
+}
+
+.ending-saved {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #888;
+  text-align: center;
+}
+
+.ending-buttons {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.btn-end,
+.btn-continue,
+.btn-new-story {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  border: none;
+  border-radius: 2rem;
+  font-size: 0.88rem;
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.btn-end {
+  background: #646cff;
+  color: #fff;
+}
+
+.btn-end:hover:not(:disabled) {
+  background: #535bf2;
+}
+
+.btn-continue {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.btn-continue:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+
+.btn-new-story {
+  background: #22c55e;
+  color: #fff;
+}
+
+.btn-new-story:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.btn-end:disabled,
+.btn-continue:disabled,
+.btn-new-story:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
