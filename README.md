@@ -6,10 +6,85 @@ Children ages 6–12 have vivid imaginations but limited tools that make storyte
 - React
 - Vite
 - LangChain
-- Groq
-- Typescript
+- Groq / Anthropic Claude
+- TypeScript
+- Redis (optional — for character & story persistence)
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+Install dependencies:
+```bash
+npm install
+```
+
+Create a `.env` file in the project root with at least one AI provider key (Anthropic takes priority if both are set):
+```
+ANTHROPIC_API_KEY=sk-ant-...
+GROQ_API_KEY=gsk_...
+
+# Optional — only needed when running with Redis
+REDIS_URL=redis://localhost:6379
+```
+
+---
+
+### Without Redis
+
+The simplest way to run the app. Stories and characters will not be saved between sessions, but everything works for a single session.
+
+```bash
+npm run dev
+```
+
+Open **http://localhost:5173**. You may see `[redis] connection error` warnings in the server log — these are expected and non-fatal; the app continues normally.
+
+---
+
+### With Redis (character & story persistence)
+
+Characters and completed stories are saved across sessions. Start a Redis instance before running the app.
+
+**Using Docker:**
+```bash
+docker run -d -p 6379:6379 redis:alpine
+```
+
+**Using Homebrew (macOS):**
+```bash
+brew services start redis
+redis-cli ping   # should return PONG
+```
+
+Then start the app:
+```bash
+npm run dev
+```
+
+Open **http://localhost:5173**. To use a non-default Redis URL, set `REDIS_URL` in `.env`.
+
+---
+
+### Running client and server separately
+
+```bash
+# Terminal 1 — Express API server (port 3001)
+npm run dev:server
+
+# Terminal 2 — Vite dev server (port 5173)
+npm run dev:client
+```
+
+---
 
 ## Versions
+
+### v1.3
+- Add support for saving stories
+- Tie stories to characters
 
 ### v1.2
 - Add redis support for saving characters
