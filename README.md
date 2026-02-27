@@ -1,5 +1,7 @@
 # Dynamic UI Storytelling
 
+**Live demo:** https://dynamic-ui-storytelling.onrender.com/
+
 Children ages 6–12 have vivid imaginations but limited tools that make storytelling feel alive. This app bridges the gap between typed narrative and visual experience: as a child types a story fragment, the interface transforms in real time — backgrounds shift, scene elements appear, and an AI co-author keeps the story moving forward. The result is an interactive, child-safe storytelling canvas that feels magical to use.
 
 ## Tech Stack
@@ -81,6 +83,10 @@ npm run dev:client
 ---
 
 ## Versions
+
+### v1.4 
+- Mobile support
+- Increase schema valdiation for Groq
 
 ### v1.3
 - Add support for saving stories

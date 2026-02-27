@@ -29,7 +29,7 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 
 // ── Shared sub-schemas ────────────────────────────────────────────────────────
 
-const ZONES = ['sky', 'ground', 'water', 'underground', 'space'] as const
+const ZONES = ['sky', 'air', 'ground', 'water', 'underground', 'space'] as const
 const SIZES = ['xs', 'sm', 'md', 'lg', 'xl'] as const
 
 const GradientStop = z.object({
@@ -128,12 +128,13 @@ ZONE COLORS:
 
 EMOJI ASSETS (choose from these only):
   sky        → ☀️ 🌤️ ⛅ ☁️ 🌙 ⭐ 🌟 🌈 🦅 🦋 🐦 🌧️
+  air        → 🐝 🦜 🦉 🦗 🪁 🎈 🎆 🎇
   ground     → 🌲 🌳 🌴 🌵 🌿 🌺 🌸 🌻 🍄 🪨 🏡 ⛺ 🏰 🌾 🐾
   water      → 🌊 🐟 🐠 🦆 ⛵ 🪸 🐚 🦀
   underground → 💎 🔮 🦇 🍂 🌑 🪨 🕯️
   space      → 🌟 ⭐ 🪐 🚀 ☄️ 🛸
-  food      → 🍎 🍌 🍕 🍔 🍦 🍩 🧁 🥕 🌽
-  animals    → 🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🦁 🐮 🐷 🐸 🐵 🦉
+  food       → 🍎 🍌 🍕 🍔 🍦 🍩 🧁 🥕 🌽 (use ground zone)
+  animals    → 🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🦁 🐮 🐷 🐸 🐵 🦉 (use ground or air zone)
 
 ASSET SIZING — set size to reflect how the story describes each element:
   xs → tiny, miniature  (e.g. "tiny bunny", "little bee")
