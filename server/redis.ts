@@ -1,4 +1,4 @@
-import Redis from 'ioredis'
+import { Redis } from 'ioredis'
 import { v4 as uuidv4 } from 'uuid'
 
 const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {

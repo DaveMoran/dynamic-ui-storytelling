@@ -1,6 +1,8 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { ChatGroq } from '@langchain/groq'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { SystemMessage, HumanMessage, AIMessage } from '@langchain/core/messages'
@@ -8,11 +10,22 @@ import { z } from 'zod'
 import { putWorkingMemory, getWorkingMemory } from './memory.js'
 import { findOrCreateCharacter, getUserCharacters, saveStory, getStoriesForCharacter } from './redis.js'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
 dotenv.config()
 
 const app = express()
 app.use(cors())
 app.use(express.json())
+
+// Serve Vite build in production
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.resolve(__dirname, '../dist')
+  app.use(express.static(distPath))
+}
+
+// Health check for UptimeRobot / Render
+app.get('/health', (_req, res) => res.json({ ok: true }))
 
 // ── Shared sub-schemas ────────────────────────────────────────────────────────
 
@@ -289,10 +302,9 @@ function extractTitle(story: string): string {
 
 // ── POST /api/end-story — clean up, generate description, save to Redis ───────
 app.post('/api/end-story', async (req, res) => {
-  const { messages, userId, sessionId, characterName, characterDescription, characterId: incomingCharId } = req.body as {
+  const { messages, userId, characterName, characterDescription, characterId: incomingCharId } = req.body as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>
     userId?: string
-    sessionId?: string
     characterName?: string
     characterDescription?: string
     characterId?: string
@@ -387,7 +399,14 @@ app.get('/api/session/:sessionId/resume', async (req, res) => {
   res.json(data ?? null)
 })
 
-const PORT = 3001
+// SPA fallback — must come after all /api routes
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (_req, res) => {
+    res.sendFile(path.resolve(__dirname, '../dist/index.html'))
+  })
+}
+
+const PORT = process.env.PORT ?? 3001
 app.listen(PORT, () => {
   console.log(`Story server running on http://localhost:${PORT}`)
 })
