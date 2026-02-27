@@ -9,7 +9,7 @@ import {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ZoneType = 'sky' | 'ground' | 'water' | 'underground' | 'space'
+type ZoneType = 'sky' | 'air' | 'ground' | 'water' | 'underground' | 'space'
 
 interface GradientStop {
   color: string
@@ -99,7 +99,8 @@ function generatePlacedAssets(specs: AssetSpec[], stops: GradientStop[]): Placed
   const usedX: number[] = []
 
   for (const spec of specs) {
-    const range = ranges[spec.zone]
+    const zoneKey = spec.zone === 'air' ? 'sky' : spec.zone
+    const range = ranges[zoneKey]
     if (!range) continue
 
     const isGround = spec.zone === 'ground'
