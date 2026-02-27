@@ -529,6 +529,7 @@
   .scene-area {
     position: absolute;
     inset: 0 0 60px 0;
+    height: auto;
     flex: unset;
     width: 100%;
   }
@@ -537,6 +538,7 @@
   .chat-sidebar {
     position: absolute;
     inset: 0 0 60px 0;
+    height: auto;
     width: 100%;
     max-width: none;
     min-width: unset;
