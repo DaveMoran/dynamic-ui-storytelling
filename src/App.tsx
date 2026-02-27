@@ -193,10 +193,36 @@ function App() {
 
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // Mobile responsive state
+  const [mobileTab, setMobileTab] = useState<'story' | 'chat' | 'controls'>('controls')
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768)
+  const [hasUnreadAI, setHasUnreadAI] = useState(false)
+  const mobileTabRef = useRef<'story' | 'chat' | 'controls'>('controls')
+
   // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  // Keep ref in sync so async sendMessage can read latest tab
+  useEffect(() => { mobileTabRef.current = mobileTab }, [mobileTab])
+
+  // Resize listener — keep isMobile in sync
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
+
+  // Auto-switch tab when uiMode changes
+  useEffect(() => {
+    if (!isMobile) return
+    if (uiMode === 'welcome' || uiMode === 'character-select' || uiMode === 'ended') {
+      setMobileTab('controls')
+    } else if (uiMode === 'chatting' || uiMode === 'suggest-ending') {
+      setMobileTab('chat')
+    }
+  }, [uiMode, isMobile])
 
   const applyScene = ({ gradientStops: stops, assets }: SceneData) => {
     const newGradient = buildGradient(stops)
@@ -339,6 +365,7 @@ function App() {
       const data = await res.json() as ChatResponse
 
       setMessages(prev => [...prev, { role: 'assistant', content: data.message }])
+      if (mobileTabRef.current !== 'chat') setHasUnreadAI(true)
       applyScene(data)
 
       if (!data.offTopic) {
@@ -456,7 +483,7 @@ function App() {
     <div className="app-layout">
 
       {/* ── Scene area (left, fills remaining width) ── */}
-      <div className="scene-area">
+      <div className={`scene-area${isMobile && mobileTab !== 'story' ? ' mobile-hidden' : ''}`}>
         <div className="bg-layer" style={{ background: bgBase }} />
         {bgIncoming && (
           <div
@@ -483,7 +510,7 @@ function App() {
       </div>
 
       {/* ── Chat sidebar (right, fixed width) ── */}
-      <div className="chat-sidebar">
+      <div className={`chat-sidebar${isMobile && mobileTab === 'story' ? ' mobile-hidden' : ''}`}>
         <header className="app-header">
           <h1>✨ Dynamic Story World</h1>
           {storyTurnCount > 0 && (
@@ -491,154 +518,196 @@ function App() {
           )}
         </header>
 
-        {/* ── Welcome screen ── */}
-        {uiMode === 'welcome' && (
-          <div className="welcome-screen">
-            <p className="welcome-prompt">What's your name, storyteller?</p>
-            <form onSubmit={handleWelcomeSubmit} className="welcome-form">
-              <input
-                type="text"
-                value={welcomeInput}
-                onChange={e => setWelcomeInput(e.target.value)}
-                placeholder="Enter your name..."
-                autoFocus
-                className="welcome-input"
-              />
-              <button
-                type="submit"
-                className="btn-welcome"
-                disabled={!welcomeInput.trim()}
-              >
-                Let's Go!
-              </button>
-            </form>
+        {/* ── Mobile in-story controls card (replaces feed on Controls tab) ── */}
+        {isMobile && mobileTab === 'controls' && (uiMode === 'chatting' || uiMode === 'suggest-ending') ? (
+          <div className="mobile-in-story-card">
+            <p className="mobile-story-label">Story in progress</p>
+            <p className="mobile-char-name">{deriveCharacterName()}</p>
+            <p className="mobile-turn-count">Turn {storyTurnCount} / 20</p>
+            <button className="btn-end-mobile" onClick={() => setUiMode('suggest-ending')}>
+              End Story
+            </button>
           </div>
-        )}
+        ) : (
+          <>
+            {/* ── Welcome screen ── */}
+            {uiMode === 'welcome' && (
+              <div className="welcome-screen">
+                <p className="welcome-prompt">What's your name, storyteller?</p>
+                <form onSubmit={handleWelcomeSubmit} className="welcome-form">
+                  <input
+                    type="text"
+                    value={welcomeInput}
+                    onChange={e => setWelcomeInput(e.target.value)}
+                    placeholder="Enter your name..."
+                    autoFocus
+                    className="welcome-input"
+                  />
+                  <button
+                    type="submit"
+                    className="btn-welcome"
+                    disabled={!welcomeInput.trim()}
+                  >
+                    Let's Go!
+                  </button>
+                </form>
+              </div>
+            )}
 
-        {/* ── Character select screen ── */}
-        {uiMode === 'character-select' && (
-          <div className="character-select">
-            <p className="character-select-heading">Welcome back! Pick an adventure:</p>
-            <div className="character-list">
-              {availableCharacters.map(char => (
-                <div key={char.id} className="character-card">
-                  <div className="character-card-info">
-                    <div className="character-card-header">
-                      <span className="character-card-name">{char.name}</span>
-                      <span className="story-count-badge">
-                        {char.storyCount} {char.storyCount === 1 ? 'story' : 'stories'}
-                      </span>
+            {/* ── Character select screen ── */}
+            {uiMode === 'character-select' && (
+              <div className="character-select">
+                <p className="character-select-heading">Welcome back! Pick an adventure:</p>
+                <div className="character-list">
+                  {availableCharacters.map(char => (
+                    <div key={char.id} className="character-card">
+                      <div className="character-card-info">
+                        <div className="character-card-header">
+                          <span className="character-card-name">{char.name}</span>
+                          <span className="story-count-badge">
+                            {char.storyCount} {char.storyCount === 1 ? 'story' : 'stories'}
+                          </span>
+                        </div>
+                        <span className="character-card-date">Last played: {formatDate(char.lastPlayed)}</span>
+                      </div>
+                      <div className="character-card-actions">
+                        <button
+                          className="btn-continue-story"
+                          onClick={() => handleContinueMidStory(char)}
+                          disabled={loading}
+                        >
+                          Continue
+                        </button>
+                        <button
+                          className="btn-new-adventure"
+                          onClick={() => handleNewAdventureWith(char)}
+                          disabled={loading}
+                        >
+                          New adventure
+                        </button>
+                      </div>
                     </div>
-                    <span className="character-card-date">Last played: {formatDate(char.lastPlayed)}</span>
-                  </div>
-                  <div className="character-card-actions">
-                    <button
-                      className="btn-continue-story"
-                      onClick={() => handleContinueMidStory(char)}
-                      disabled={loading}
-                    >
-                      Continue
-                    </button>
-                    <button
-                      className="btn-new-adventure"
-                      onClick={() => handleNewAdventureWith(char)}
-                      disabled={loading}
-                    >
-                      New adventure
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <button className="btn-brand-new" onClick={handleNewStory} disabled={loading}>
-              Start a brand new story
-            </button>
-          </div>
-        )}
-
-        {/* ── Message feed (chatting / suggest-ending / ended) ── */}
-        {(uiMode === 'chatting' || uiMode === 'suggest-ending' || uiMode === 'ended') && (
-          <div className="message-feed">
-            {messages.map((msg, i) => (
-              <div key={i} className={`message ${msg.role}`}>
-                <span className="message-label">
-                  {msg.role === 'user' ? 'You' : 'Story AI'}
-                </span>
-                <p className="message-bubble">{msg.content}</p>
-              </div>
-            ))}
-
-            {loading && (
-              <div className="message assistant">
-                <span className="message-label">Story AI</span>
-                <p className="message-bubble typing">thinking...</p>
+                <button className="btn-brand-new" onClick={handleNewStory} disabled={loading}>
+                  Start a brand new story
+                </button>
               </div>
             )}
 
-            <div ref={bottomRef} />
-          </div>
-        )}
+            {/* ── Message feed (chatting / suggest-ending / ended) ── */}
+            {(uiMode === 'chatting' || uiMode === 'suggest-ending' || uiMode === 'ended') && (
+              <div className="message-feed">
+                {messages.map((msg, i) => (
+                  <div key={i} className={`message ${msg.role}`}>
+                    <span className="message-label">
+                      {msg.role === 'user' ? 'You' : 'Story AI'}
+                    </span>
+                    <p className="message-bubble">{msg.content}</p>
+                  </div>
+                ))}
 
-        {uiMode === 'chatting' && (
-          <div className="input-bar">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Continue the story..."
-              disabled={loading}
-              autoFocus
-            />
-            <button onClick={sendMessage} disabled={loading || !input.trim()}>
-              Send
-            </button>
-          </div>
-        )}
+                {loading && (
+                  <div className="message assistant">
+                    <span className="message-label">Story AI</span>
+                    <p className="message-bubble typing">thinking...</p>
+                  </div>
+                )}
 
-        {uiMode === 'suggest-ending' && (
-          <div className="ending-choice">
-            <p className="ending-prompt">✨ Your story is coming to a close!</p>
-            <div className="ending-buttons">
-              <button
-                className="btn-end"
-                onClick={endStory}
-                disabled={loading}
-              >
-                End Story
-              </button>
-              <button
-                className="btn-continue"
-                onClick={() => setUiMode('chatting')}
-                disabled={loading}
-              >
-                Continue Story
-              </button>
-            </div>
-          </div>
-        )}
-
-        {uiMode === 'ended' && (
-          <div className="ending-choice">
-            {savedTitle && (
-              <p className="ending-saved">📖 <strong>"{savedTitle}"</strong> has been saved!</p>
+                <div ref={bottomRef} />
+              </div>
             )}
-            <p className="ending-prompt">What's next?</p>
-            <div className="ending-buttons">
-              <button className="btn-end" onClick={handleNewAdventureWithCurrent} disabled={loading}>
-                New adventure with {deriveCharacterName() ?? 'this character'}
-              </button>
-              <button
-                className="btn-continue"
-                onClick={() => userId ? fetchAndShowCharacters(userId) : handleNewStory()}
-                disabled={loading}
-              >
-                New character
-              </button>
-            </div>
-          </div>
+
+            {uiMode === 'chatting' && (
+              <div className="input-bar">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Continue the story..."
+                  disabled={loading}
+                  autoFocus
+                />
+                <button onClick={sendMessage} disabled={loading || !input.trim()}>
+                  Send
+                </button>
+              </div>
+            )}
+
+            {uiMode === 'suggest-ending' && (
+              <div className="ending-choice">
+                <p className="ending-prompt">✨ Your story is coming to a close!</p>
+                <div className="ending-buttons">
+                  <button
+                    className="btn-end"
+                    onClick={endStory}
+                    disabled={loading}
+                  >
+                    End Story
+                  </button>
+                  <button
+                    className="btn-continue"
+                    onClick={() => setUiMode('chatting')}
+                    disabled={loading}
+                  >
+                    Continue Story
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {uiMode === 'ended' && (
+              <div className="ending-choice">
+                {savedTitle && (
+                  <p className="ending-saved">📖 <strong>"{savedTitle}"</strong> has been saved!</p>
+                )}
+                <p className="ending-prompt">What's next?</p>
+                <div className="ending-buttons">
+                  <button className="btn-end" onClick={handleNewAdventureWithCurrent} disabled={loading}>
+                    New adventure with {deriveCharacterName() ?? 'this character'}
+                  </button>
+                  <button
+                    className="btn-continue"
+                    onClick={() => userId ? fetchAndShowCharacters(userId) : handleNewStory()}
+                    disabled={loading}
+                  >
+                    New character
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
+
+      {/* ── Mobile bottom tab bar (hidden on desktop via CSS) ── */}
+      <nav className="mobile-tab-bar">
+        <button
+          className={`mobile-tab${mobileTab === 'story' ? ' active' : ''}`}
+          onClick={() => setMobileTab('story')}
+        >
+          <span className="mobile-tab-icon">🌄</span>
+          <span className="mobile-tab-label">Scene</span>
+        </button>
+
+        <button
+          className={`mobile-tab${mobileTab === 'chat' ? ' active' : ''}`}
+          onClick={() => { setMobileTab('chat'); setHasUnreadAI(false) }}
+        >
+          <span className="mobile-tab-icon">💬</span>
+          <span className="mobile-tab-label">Chat</span>
+          {hasUnreadAI && <span className="tab-badge" />}
+        </button>
+
+        <button
+          className={`mobile-tab${mobileTab === 'controls' ? ' active' : ''}`}
+          onClick={() => setMobileTab('controls')}
+        >
+          <span className="mobile-tab-icon">🎭</span>
+          <span className="mobile-tab-label">Characters</span>
+        </button>
+      </nav>
 
     </div>
   )
